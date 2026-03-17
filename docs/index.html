@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chewy — AI Image Generation in Your Terminal</title>
+  <meta name="description" content="A beautiful terminal UI for local AI image generation with Stable Diffusion and FLUX. Private, fast, free.">
+  <meta property="og:title" content="Chewy — AI Image Generation in Your Terminal">
+  <meta property="og:description" content="A beautiful terminal UI for local AI image generation with Stable Diffusion and FLUX.">
+  <meta property="og:image" content="assets/logo.jpeg">
+  <link rel="icon" href="assets/logo.jpeg">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
+
+    :root {
+      --bg: #0a0a0f;
+      --bg-card: #12121a;
+      --bg-terminal: #0d0d14;
+      --border: #1e1e2e;
+      --border-glow: #874bfd33;
+      --text: #e2e2e8;
+      --text-dim: #6e6e82;
+      --text-muted: #44445a;
+      --primary: #874bfd;
+      --primary-glow: #874bfd44;
+      --accent: #ff6b9d;
+      --accent-glow: #ff6b9d33;
+      --success: #50fa7b;
+      --cyan: #8be9fd;
+      --yellow: #f1fa8c;
+      --mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+      --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ---- Ambient glow background ---- */
+    .glow-bg {
+      position: fixed;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(ellipse at 30% 20%, var(--primary-glow) 0%, transparent 50%),
+                  radial-gradient(ellipse at 70% 80%, var(--accent-glow) 0%, transparent 50%);
+      pointer-events: none;
+      z-index: -1;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ---- Nav ---- */
+    nav {
+      position: fixed;
+      top: 0;
+      width: 100%;
+      z-index: 100;
+      background: rgba(10, 10, 15, 0.8);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+    nav .container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 60px;
+    }
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text);
+      font-weight: 700;
+      font-size: 18px;
+    }
+    .nav-logo img {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+    }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      list-style: none;
+    }
+    .nav-links a {
+      color: var(--text-dim);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text); }
+    .nav-gh {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      padding: 6px 14px;
+      border-radius: 8px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      transition: border-color 0.2s;
+    }
+    .nav-gh:hover { border-color: var(--primary); }
+    .nav-gh svg { width: 16px; height: 16px; fill: currentColor; }
+
+    /* ---- Hero ---- */
+    .hero {
+      padding: 160px 0 80px;
+      text-align: center;
+    }
+    .hero-badge {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--primary);
+      background: var(--primary-glow);
+      border: 1px solid #874bfd44;
+      padding: 4px 14px;
+      border-radius: 20px;
+      margin-bottom: 24px;
+    }
+    .hero h1 {
+      font-size: clamp(40px, 6vw, 72px);
+      font-weight: 700;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      margin-bottom: 20px;
+    }
+    .hero h1 .gradient {
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero p {
+      font-size: 18px;
+      color: var(--text-dim);
+      max-width: 540px;
+      margin: 0 auto 40px;
+      line-height: 1.7;
+    }
+    .hero-actions {
+      display: flex;
+      gap: 14px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 28px;
+      background: var(--primary);
+      color: #fff;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 15px;
+      transition: transform 0.15s, box-shadow 0.15s;
+      box-shadow: 0 0 20px var(--primary-glow);
+    }
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 0 30px var(--primary-glow);
+    }
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 28px;
+      background: var(--bg-card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 15px;
+      transition: border-color 0.2s;
+    }
+    .btn-secondary:hover { border-color: var(--text-dim); }
+
+    /* ---- Install bar ---- */
+    .install-bar {
+      max-width: 480px;
+      margin: 32px auto 0;
+      background: var(--bg-terminal);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .install-bar code {
+      font-family: var(--mono);
+      font-size: 14px;
+      color: var(--text);
+    }
+    .install-bar .prompt { color: var(--success); }
+    .install-bar button {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 4px;
+      transition: color 0.2s;
+      flex-shrink: 0;
+    }
+    .install-bar button:hover { color: var(--text); }
+    .install-bar button svg { width: 18px; height: 18px; }
+
+    /* ---- Terminal mockup ---- */
+    .terminal-section {
+      padding: 40px 0 80px;
+    }
+    .terminal {
+      background: var(--bg-terminal);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 40px var(--border-glow);
+    }
+    .terminal-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      background: #16161e;
+      border-bottom: 1px solid var(--border);
+    }
+    .terminal-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+    .terminal-dot.red { background: #ff5f57; }
+    .terminal-dot.yellow { background: #febc2e; }
+    .terminal-dot.green { background: #28c840; }
+    .terminal-title {
+      flex: 1;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    .terminal-body {
+      padding: 24px;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.7;
+      min-height: 320px;
+      overflow: hidden;
+    }
+    .terminal-body .line { margin-bottom: 2px; }
+    .terminal-body .prompt-line { color: var(--success); }
+    .terminal-body .comment { color: var(--text-muted); }
+    .terminal-body .cmd { color: var(--text); }
+    .terminal-body .flag { color: var(--cyan); }
+    .terminal-body .string { color: var(--yellow); }
+    .terminal-body .accent { color: var(--accent); }
+    .terminal-body .primary { color: var(--primary); }
+    .terminal-body .dim { color: var(--text-dim); }
+
+    /* Animated terminal UI mockup */
+    .tui-mockup {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      grid-template-rows: auto 1fr auto;
+      gap: 0;
+      height: 340px;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+    .tui-header {
+      grid-column: 1 / -1;
+      padding: 6px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tui-header .logo-text {
+      background: linear-gradient(90deg, var(--primary), var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .tui-sidebar {
+      border-right: 1px solid var(--border);
+      padding: 8px;
+      overflow: hidden;
+    }
+    .tui-sidebar .model-item {
+      padding: 4px 8px;
+      border-radius: 4px;
+      color: var(--text-dim);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tui-sidebar .model-item.active {
+      background: var(--primary-glow);
+      color: var(--primary);
+      font-weight: 600;
+    }
+    .tui-main {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .tui-prompt-area {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .tui-prompt-label {
+      font-size: 11px;
+      color: var(--primary);
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .tui-prompt-text {
+      color: var(--text);
+      font-size: 12px;
+    }
+    .tui-prompt-cursor {
+      display: inline-block;
+      width: 8px;
+      height: 14px;
+      background: var(--primary);
+      animation: blink 1s step-end infinite;
+      vertical-align: text-bottom;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+    .tui-preview {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+      position: relative;
+    }
+    .tui-preview img {
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 4px;
+      object-fit: contain;
+    }
+    .tui-status {
+      grid-column: 1 / -1;
+      padding: 4px 12px;
+      background: var(--primary);
+      color: #fff;
+      font-size: 11px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    /* ---- Features ---- */
+    .features {
+      padding: 80px 0;
+    }
+    .section-label {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--primary);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 12px;
+    }
+    .section-title {
+      font-size: clamp(28px, 4vw, 40px);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+    .section-desc {
+      font-size: 16px;
+      color: var(--text-dim);
+      max-width: 540px;
+      margin-bottom: 48px;
+    }
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px;
+      transition: border-color 0.3s, transform 0.2s;
+    }
+    .feature-card:hover {
+      border-color: var(--primary);
+      transform: translateY(-2px);
+    }
+    .feature-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      margin-bottom: 16px;
+    }
+    .feature-card h3 {
+      font-size: 17px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .feature-card p {
+      font-size: 14px;
+      color: var(--text-dim);
+      line-height: 1.6;
+    }
+
+    /* ---- Gallery ---- */
+    .gallery {
+      padding: 80px 0;
+    }
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+    }
+    .gallery-item {
+      position: relative;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      aspect-ratio: 1;
+      transition: border-color 0.3s, transform 0.2s;
+    }
+    .gallery-item:hover {
+      border-color: var(--primary);
+      transform: scale(1.02);
+    }
+    .gallery-item img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .gallery-item .prompt-overlay {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 12px;
+      background: linear-gradient(transparent, rgba(10,10,15,0.9));
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    /* ---- Keybindings ---- */
+    .keybindings {
+      padding: 80px 0;
+    }
+    .keys-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    .key-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    kbd {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 2px 8px;
+      color: var(--primary);
+      min-width: 38px;
+      text-align: center;
+    }
+    .key-item span {
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+
+    /* ---- Install section ---- */
+    .install {
+      padding: 80px 0;
+    }
+    .install-methods {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 20px;
+    }
+    .install-method {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px;
+    }
+    .install-method h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .install-method .desc {
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-bottom: 16px;
+    }
+    .code-block {
+      background: var(--bg-terminal);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.7;
+      overflow-x: auto;
+    }
+    .code-block .prompt { color: var(--success); }
+    .code-block .cmd { color: var(--text); }
+
+    /* ---- CTA ---- */
+    .cta {
+      padding: 100px 0;
+      text-align: center;
+    }
+    .cta h2 {
+      font-size: clamp(28px, 4vw, 44px);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+    .cta p {
+      font-size: 16px;
+      color: var(--text-dim);
+      margin-bottom: 32px;
+    }
+
+    /* ---- Footer ---- */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 40px 0;
+    }
+    footer .container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    footer .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    footer .brand img { width: 24px; height: 24px; border-radius: 6px; }
+    footer .links {
+      display: flex;
+      gap: 24px;
+      list-style: none;
+    }
+    footer .links a {
+      color: var(--text-dim);
+      text-decoration: none;
+      font-size: 13px;
+      transition: color 0.2s;
+    }
+    footer .links a:hover { color: var(--text); }
+    footer .copy {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* ---- Responsive ---- */
+    @media (max-width: 768px) {
+      .nav-links { display: none; }
+      .tui-mockup { grid-template-columns: 1fr; height: auto; }
+      .tui-sidebar { display: none; }
+      .hero { padding: 120px 0 60px; }
+      .feature-grid { grid-template-columns: 1fr; }
+      .keys-grid { grid-template-columns: 1fr; }
+      .install-methods { grid-template-columns: 1fr; }
+      footer .container { flex-direction: column; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+  <div class="glow-bg"></div>
+
+  <!-- Nav -->
+  <nav>
+    <div class="container">
+      <a href="#" class="nav-logo">
+        <img src="assets/logo.jpeg" alt="Chewy">
+        chewy
+      </a>
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#gallery">Gallery</a></li>
+        <li><a href="#shortcuts">Shortcuts</a></li>
+        <li><a href="#install">Install</a></li>
+        <li>
+          <a href="https://github.com/Holy-Coders/chewy" class="nav-gh">
+            <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            GitHub
+          </a>
+        </li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-badge">v0.2.4 &mdash; Now with FLUX support</div>
+      <h1>AI image generation<br><span class="gradient">in your terminal.</span></h1>
+      <p>Chewy is a beautiful TUI for generating images locally with Stable Diffusion and FLUX. Private. Fast. Free. No cloud, no API keys, no limits.</p>
+      <div class="hero-actions">
+        <a href="#install" class="btn-primary">Get Started</a>
+        <a href="https://github.com/Holy-Coders/chewy" class="btn-secondary">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          View Source
+        </a>
+      </div>
+      <div class="install-bar">
+        <code><span class="prompt">$</span> brew install Holy-Coders/chewy/chewy</code>
+        <button onclick="navigator.clipboard.writeText('brew install Holy-Coders/chewy/chewy')" title="Copy">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Terminal mockup -->
+  <section class="terminal-section">
+    <div class="container">
+      <div class="terminal">
+        <div class="terminal-header">
+          <div class="terminal-dot red"></div>
+          <div class="terminal-dot yellow"></div>
+          <div class="terminal-dot green"></div>
+          <div class="terminal-title">chewy</div>
+          <div style="width: 52px;"></div>
+        </div>
+        <div class="terminal-body">
+          <div class="tui-mockup">
+            <div class="tui-header">
+              <span class="logo-text">chewy</span>
+              <span style="color:var(--text-dim);font-size:11px;">|</span>
+              <span style="color:var(--text);font-size:11px;">dreamshaper-v8</span>
+              <span style="color:var(--text-dim);font-size:11px;">SD 1.x</span>
+              <span style="color:var(--text-dim);font-size:11px;margin-left:auto;">[^n] models</span>
+            </div>
+            <div class="tui-sidebar">
+              <div style="color:var(--primary);font-size:11px;font-weight:600;margin-bottom:8px;">Models</div>
+              <div class="model-item active">dreamshaper-v8</div>
+              <div class="model-item">sd15-q8_0</div>
+              <div class="model-item">flux1-schnell-F16</div>
+              <div class="model-item">flux1-dev-Q2_K</div>
+              <div class="model-item">realisticVision-v5</div>
+            </div>
+            <div class="tui-main">
+              <div class="tui-prompt-area">
+                <div class="tui-prompt-label">Prompt</div>
+                <div class="tui-prompt-text">a sunset over the ocean, vibrant colors, photorealistic<span class="tui-prompt-cursor"></span></div>
+              </div>
+              <div class="tui-prompt-area" style="border-bottom:1px solid var(--border);">
+                <div style="font-size:11px;color:var(--text-dim);">steps <span style="color:var(--cyan);">20</span> &nbsp; cfg <span style="color:var(--cyan);">7.0</span> &nbsp; 512x512 &nbsp; seed <span style="color:var(--cyan);">-1</span> &nbsp; euler_a</div>
+              </div>
+              <div class="tui-preview">
+                <img src="assets/example-sunset.png" alt="Generated sunset image">
+              </div>
+            </div>
+            <div class="tui-status">
+              <span>output: outputs/20260313_012424.png | 25.4s | seed 42</span>
+              <span>^e open | ^f fullscreen</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="features" id="features">
+    <div class="container">
+      <div class="section-label">Features</div>
+      <h2 class="section-title">Everything you need.<br>Nothing you don't.</h2>
+      <p class="section-desc">Generate images entirely on your machine. No accounts, no subscriptions, no data leaving your computer.</p>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="feature-icon" style="background:var(--primary-glow);color:var(--primary);">&#x1f512;</div>
+          <h3>100% Local & Private</h3>
+          <p>Everything runs on your hardware. Your prompts and images never leave your machine. No cloud, no API keys, no tracking.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon" style="background:#50fa7b22;color:var(--success);">&#x26a1;</div>
+          <h3>Metal GPU Acceleration</h3>
+          <p>Powered by stable-diffusion.cpp with Metal support. Generate images in seconds on Apple Silicon, not minutes.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon" style="background:var(--accent-glow);color:var(--accent);">&#x1f3a8;</div>
+          <h3>SD & FLUX Models</h3>
+          <p>Supports Stable Diffusion 1.x, 2.x, SDXL, SD3, and FLUX. Use .gguf, .safetensors, or .ckpt models. Auto-detects model type.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon" style="background:#8be9fd22;color:var(--cyan);">&#x1f4e5;</div>
+          <h3>Built-in Model Browser</h3>
+          <p>Browse and download models directly from HuggingFace without leaving the terminal. Search, preview, and install in seconds.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon" style="background:#f1fa8c22;color:var(--yellow);">&#x1f5bc;</div>
+          <h3>img2img & Clipboard</h3>
+          <p>Use an existing image as a starting point. Browse for files or paste directly from your clipboard with Ctrl+V.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon" style="background:#ff79c622;color:#ff79c6;">&#x2699;</div>
+          <h3>LoRA, Presets & History</h3>
+          <p>Apply LoRA weights, save parameter presets for quick switching, and browse your full generation history with metadata.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon" style="background:#bd93f922;color:#bd93f9;">&#x1f5a5;</div>
+          <h3>Live Preview</h3>
+          <p>Watch your image take shape in real-time as it generates. Accurate ETA and progress tracking with step-by-step updates.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon" style="background:#50fa7b22;color:var(--success);">&#x1f4c1;</div>
+          <h3>Auto Model Discovery</h3>
+          <p>Automatically finds models from DiffusionBee and Draw Things. Validates compatibility and remembers your last selection.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Gallery -->
+  <section class="gallery" id="gallery">
+    <div class="container">
+      <div class="section-label">Gallery</div>
+      <h2 class="section-title">Generated entirely on-device.</h2>
+      <p class="section-desc">Real outputs from chewy running locally. No cloud processing, no watermarks.</p>
+      <div class="gallery-grid">
+        <div class="gallery-item">
+          <img src="assets/example-sunset.png" alt="Sunset over ocean">
+          <div class="prompt-overlay">"a sunset over the ocean, vibrant colors"</div>
+        </div>
+        <div class="gallery-item">
+          <img src="assets/example-cat.png" alt="Cat with pizza">
+          <div class="prompt-overlay">"a black cat next to a pepperoni pizza, photorealistic"</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Shortcuts -->
+  <section class="keybindings" id="shortcuts">
+    <div class="container">
+      <div class="section-label">Keyboard Shortcuts</div>
+      <h2 class="section-title">Designed for speed.</h2>
+      <p class="section-desc">Every action is a keystroke away. No mouse needed.</p>
+      <div class="keys-grid">
+        <div class="key-item"><kbd>tab</kbd> <span>Cycle focus</span></div>
+        <div class="key-item"><kbd>enter</kbd> <span>Generate image</span></div>
+        <div class="key-item"><kbd>^n</kbd> <span>Model picker</span></div>
+        <div class="key-item"><kbd>^d</kbd> <span>Download models</span></div>
+        <div class="key-item"><kbd>^b</kbd> <span>Browse init image</span></div>
+        <div class="key-item"><kbd>^v</kbd> <span>Paste from clipboard</span></div>
+        <div class="key-item"><kbd>^a</kbd> <span>Gallery</span></div>
+        <div class="key-item"><kbd>^g</kbd> <span>Generation history</span></div>
+        <div class="key-item"><kbd>^l</kbd> <span>LoRA selection</span></div>
+        <div class="key-item"><kbd>^p</kbd> <span>Presets</span></div>
+        <div class="key-item"><kbd>^e</kbd> <span>Open in viewer</span></div>
+        <div class="key-item"><kbd>^f</kbd> <span>Fullscreen preview</span></div>
+        <div class="key-item"><kbd>^x</kbd> <span>Cancel generation</span></div>
+        <div class="key-item"><kbd>^r</kbd> <span>Randomize seed</span></div>
+        <div class="key-item"><kbd>^u</kbd> <span>Clear init image</span></div>
+        <div class="key-item"><kbd>^q</kbd> <span>Quit</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Install -->
+  <section class="install" id="install">
+    <div class="container">
+      <div class="section-label">Installation</div>
+      <h2 class="section-title">Up and running in one command.</h2>
+      <p class="section-desc">Chewy installs everything you need, including the sd inference engine with GPU acceleration.</p>
+      <div class="install-methods">
+        <div class="install-method">
+          <h3>Homebrew (recommended)</h3>
+          <p class="desc">Installs chewy + stable-diffusion.cpp with Metal GPU support.</p>
+          <div class="code-block">
+            <span class="prompt">$</span> <span class="cmd">brew install Holy-Coders/chewy/chewy</span><br>
+            <span class="prompt">$</span> <span class="cmd">chewy</span>
+          </div>
+        </div>
+        <div class="install-method">
+          <h3>From source</h3>
+          <p class="desc">Requires Ruby 4.0+ and stable-diffusion.cpp on your PATH.</p>
+          <div class="code-block">
+            <span class="prompt">$</span> <span class="cmd">git clone https://github.com/Holy-Coders/chewy.git</span><br>
+            <span class="prompt">$</span> <span class="cmd">cd chewy && bundle install</span><br>
+            <span class="prompt">$</span> <span class="cmd">ruby chewy.rb</span>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:32px;">
+        <div class="install-method">
+          <h3>Configuration</h3>
+          <p class="desc">Customize paths and defaults with environment variables.</p>
+          <div class="code-block">
+            <span style="color:var(--text-dim);"># Set custom model directory</span><br>
+            <span class="prompt">$</span> <span class="cmd">export CHEWY_MODELS_DIR=~/my-models</span><br><br>
+            <span style="color:var(--text-dim);"># Set custom output directory</span><br>
+            <span class="prompt">$</span> <span class="cmd">export CHEWY_OUTPUT_DIR=~/Pictures/ai</span><br><br>
+            <span style="color:var(--text-dim);"># Point to a custom sd binary</span><br>
+            <span class="prompt">$</span> <span class="cmd">export SD_BIN=/path/to/sd</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta">
+    <div class="container">
+      <h2>Start generating <span class="gradient" style="background:linear-gradient(135deg,var(--primary),var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent;">locally</span>.</h2>
+      <p>No sign-ups. No API keys. No cloud. Just your machine and your imagination.</p>
+      <div class="hero-actions">
+        <a href="https://github.com/Holy-Coders/chewy" class="btn-primary">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          View on GitHub
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <div class="brand">
+        <img src="assets/logo.jpeg" alt="Chewy">
+        chewy
+      </div>
+      <ul class="links">
+        <li><a href="https://github.com/Holy-Coders/chewy">GitHub</a></li>
+        <li><a href="https://github.com/Holy-Coders/chewy/issues">Issues</a></li>
+        <li><a href="https://github.com/Holy-Coders/chewy/blob/main/LICENSE">License</a></li>
+      </ul>
+      <div class="copy">MIT &copy; 2026 Holy Coders</div>
+    </div>
+  </footer>
+</body>
+</html>
