@@ -57,6 +57,50 @@ FLUX_COMPANION_FILES = {
   },
 }.freeze
 
+# Curated list of recommended models for new users
+PRELOADED_MODELS = [
+  {
+    name: "Stable Diffusion 1.5 (Q8)",
+    repo: "second-state/stable-diffusion-v-1-5-GGUF",
+    file: "stable-diffusion-v1-5-Q8_0.gguf",
+    size: 2_132_887_808,
+    type: "SD 1.5",
+    desc: "Classic SD 1.5 — fast, low VRAM, great for learning",
+  },
+  {
+    name: "Stable Diffusion 3.5 Medium (Q5)",
+    repo: "stduhpf/SD3.5-Medium-GGUF",
+    file: "sd3.5_medium-Q5_K_S.gguf",
+    size: 3_046_699_072,
+    type: "SD 3.5",
+    desc: "Newest SD architecture — excellent quality/speed balance",
+  },
+  {
+    name: "SDXL Turbo (Q5)",
+    repo: "stduhpf/SDXL-Turbo-Q5_0-GGUF",
+    file: "sdxl-turbo-Q5_0.gguf",
+    size: 4_630_000_000,
+    type: "SDXL",
+    desc: "Fast SDXL variant — 1-4 steps, real-time generation",
+  },
+  {
+    name: "DreamShaper XL Turbo (Q6)",
+    repo: "second-state/DreamShaper-XL-Turbo-v2.1-GGUF",
+    file: "DreamShaperXL_Turbo_v2.1-Q6_K.gguf",
+    size: 5_455_000_000,
+    type: "SDXL",
+    desc: "High-quality artistic SDXL model — 6-8 steps",
+  },
+  {
+    name: "FLUX.1 Schnell (Q4)",
+    repo: "second-state/FLUX.1-schnell-GGUF",
+    file: "flux1-schnell-Q4_0.gguf",
+    size: 6_876_948_608,
+    type: "FLUX",
+    desc: "State-of-the-art FLUX — needs companion files (auto-downloaded)",
+  },
+].freeze
+
 # ---------- Themes ----------
 
 THEMES = {
@@ -374,9 +418,9 @@ class Chewy
     @gen_preview_cache = nil
 
     # Download browser
-    @download_view = :repos
+    @download_view = :recommended
     @remote_repos = []; @remote_files = []
-    @repo_list = nil; @file_list = nil
+    @repo_list = nil; @file_list = nil; @recommended_list = nil
     @selected_repo_id = nil
     @fetching = false
     @model_downloading = false
@@ -1569,7 +1613,31 @@ class Chewy
     when FOCUS_PROMPT then @prompt_input.blur
     when FOCUS_NEGATIVE then @negative_input.blur
     end
-    @overlay = :download; @download_view = :repos
+    @overlay = :download; @download_view = :recommended
+    @error_message = nil; @fetching = false
+    @download_search_input.value = "gguf"
+    @download_search_input.blur
+    @download_search_focused = false
+    build_recommended_list
+    [self, nil]
+  end
+
+  def build_recommended_list
+    items = PRELOADED_MODELS.map do |m|
+      already = File.exist?(File.join(@models_dir, m[:file]))
+      status = already ? " (installed)" : ""
+      { title: "#{m[:name]}#{status}", description: "#{m[:type]} | #{format_bytes(m[:size])} — #{m[:desc]}" }
+    end
+    items << { title: "Browse HuggingFace...", description: "Search for more models online" }
+    @recommended_list = Bubbles::List.new(items, width: @width - 8, height: [@height - 10, 6].max)
+    @recommended_list.show_title = false
+    @recommended_list.show_status_bar = false
+    @recommended_list.selected_item_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    @recommended_list.item_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+  end
+
+  def enter_hf_search_mode
+    @download_view = :repos
     @error_message = nil; @fetching = true
     @download_search_input.value = "gguf"
     @download_search_input.focus
@@ -1578,8 +1646,8 @@ class Chewy
   end
 
   def exit_download_mode
-    @overlay = nil; @download_view = :repos; @fetching = false
-    @repo_list = nil; @file_list = nil
+    @overlay = nil; @download_view = :recommended; @fetching = false
+    @repo_list = nil; @file_list = nil; @recommended_list = nil
     @remote_repos = []; @remote_files = []; @selected_repo_id = nil; @error_message = nil
     @download_search_input.blur; @download_search_focused = false
     case @focus
@@ -1780,10 +1848,14 @@ class Chewy
         @download_search_focused = false
         return [self, nil]
       end
-      return @download_view == :files ? back_to_repos : exit_download_mode
+      return back_to_repos if @download_view == :files
+      return back_to_recommended if @download_view == :repos
+      return exit_download_mode
     when "q"
       return [self, nil] if @model_downloading || @download_search_focused
-      return @download_view == :files ? back_to_repos : exit_download_mode
+      return back_to_repos if @download_view == :files
+      return back_to_recommended if @download_view == :repos
+      return exit_download_mode
     when "tab"
       if @download_view == :repos
         @download_search_focused = !@download_search_focused
@@ -1798,10 +1870,40 @@ class Chewy
     end
 
     case @download_view
+    when :recommended then handle_recommended_list_key(message)
     when :repos then handle_repo_list_key(message)
     when :files then handle_file_list_key(message)
     else [self, nil]
     end
+  end
+
+  def handle_recommended_list_key(message)
+    return [self, nil] unless @recommended_list
+    if message.to_s == "enter"
+      idx = @recommended_list.selected_index rescue 0
+      if idx < PRELOADED_MODELS.length
+        m = PRELOADED_MODELS[idx]
+        dest = File.join(@models_dir, m[:file])
+        if File.exist?(dest)
+          @error_message = "#{m[:name]} is already installed"
+          return [self, nil]
+        end
+        return [self, start_model_download(m[:repo], m[:file], m[:size])]
+      else
+        # "Browse HuggingFace..." option
+        return enter_hf_search_mode
+      end
+    end
+    @recommended_list, cmd = @recommended_list.update(message)
+    [self, cmd]
+  end
+
+  def back_to_recommended
+    @download_view = :recommended; @file_list = nil; @repo_list = nil
+    @remote_files = []; @remote_repos = []; @selected_repo_id = nil; @error_message = nil
+    @download_search_input.blur; @download_search_focused = false
+    build_recommended_list
+    [self, nil]
   end
 
   def handle_download_search_key(message)
@@ -2992,6 +3094,8 @@ class Chewy
   def render_download_view
     content = if @fetching
       "#{@spinner.view} Searching HuggingFace..."
+    elsif @download_view == :recommended && @recommended_list
+      @recommended_list.view
     elsif @download_view == :repos && @repo_list
       @repo_list.view
     elsif @download_view == :files && @file_list
@@ -3000,7 +3104,11 @@ class Chewy
       Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("Loading...")
     end
 
-    title = @download_view == :files ? "Files in #{@selected_repo_id}" : "Download Models"
+    title = case @download_view
+    when :recommended then "Recommended Models"
+    when :files then "Files in #{@selected_repo_id}"
+    else "Download Models"
+    end
     title_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
     dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
     separator = dim.render("─" * (@width - 6))
@@ -3045,12 +3153,14 @@ class Chewy
 
     status_text = if @status_message
       @status_message
+    elsif @download_view == :recommended
+      "enter: download | esc: close"
     elsif @download_view == :files
       "enter: download | esc: back"
     elsif @download_search_focused
       "enter: search | esc: unfocus | tab: toggle"
     else
-      "tab: search | enter: browse | esc: close"
+      "tab: search | enter: browse | esc: back"
     end
 
     key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
