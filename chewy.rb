@@ -657,16 +657,20 @@ class OpenAIImagesProvider < Provider::Base
     size = nearest_size(model, request.width, request.height)
     n = [request.batch || 1, 1].max
 
+    # Normalize model — may come from another provider's selection
+    model = "gpt-image-1" unless MODELS.any? { |m| m[:id] == model }
+
     body = { model: model, prompt: request.prompt, n: n, size: size }
 
-    if model == "gpt-image-1"
+    case model
+    when "gpt-image-1"
       body[:quality] = request.steps && request.steps >= 20 ? "high" : "auto"
       body[:output_format] = "png"
-    elsif model == "dall-e-3"
+    when "dall-e-3"
       body[:quality] = request.steps && request.steps >= 20 ? "hd" : "standard"
       body[:response_format] = "b64_json"
       body[:n] = 1  # dall-e-3 only supports n=1
-    else
+    when "dall-e-2"
       body[:response_format] = "b64_json"
     end
 
