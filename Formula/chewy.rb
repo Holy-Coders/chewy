@@ -17,6 +17,7 @@ class Chewy < Formula
     system "gem", "install", "lipgloss", "-v", "0.2.2", "--no-document", "--install-dir", libexec
     system "gem", "install", "bubbles", "-v", "0.1.1", "--no-document", "--install-dir", libexec
     system "gem", "install", "chunky_png", "-v", "1.4.0", "--no-document", "--install-dir", libexec
+    system "gem", "install", "base64", "--no-document", "--install-dir", libexec
 
     libexec.install "chewy.rb"
     libexec.install "Gemfile"
