@@ -4695,6 +4695,14 @@ class Chewy
     when "esc"
       @api_key_input.value = ""
       return close_overlay
+    when "ctrl+v"
+      # Read from system clipboard since terminal paste doesn't work reliably
+      clip = `pbpaste 2>/dev/null`.strip rescue ""
+      unless clip.empty?
+        @api_key_input.value = clip
+        @status_message = "Pasted from clipboard"
+      end
+      return [self, nil]
     when "enter"
       api_key = @api_key_input.value.strip
       if api_key.empty?
@@ -4742,7 +4750,7 @@ class Chewy
   end
 
   def render_api_key_status
-    "enter: save | esc: cancel"
+    "^v: paste from clipboard | enter: save | esc: cancel"
   end
 
   # ========== HF Token Overlay ==========
