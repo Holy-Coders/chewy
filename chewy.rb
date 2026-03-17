@@ -16,6 +16,9 @@ require "base64"
 
 # ---------- Constants ----------
 
+CHEWY_VERSION = File.read(File.join(__dir__, "VERSION")).strip rescue "0.0.0"
+CHEWY_REPO = "Holy-Coders/chewy"
+
 HF_API_BASE = "https://huggingface.co/api"
 HF_DOWNLOAD_BASE = "https://huggingface.co"
 MODEL_EXTENSIONS = %w[.gguf .safetensors .ckpt].freeze
@@ -2254,13 +2257,24 @@ class Chewy
 
   def render_empty_preview(max_w, max_h)
     dim = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED)
-    lines = [
-      dim.render("No image yet"),
-      "",
-      dim.render("Press enter to generate"),
-    ]
-    pad_top = [(max_h - lines.length) / 2, 0].max
-    (Array.new(pad_top, "") + lines).join("\n")
+
+    # Show logo in empty preview area
+    logo_path = File.join(__dir__, "logo.jpeg")
+    logo_img = if File.exist?(logo_path)
+      logo_h = [max_h - 4, 8].min
+      render_image(logo_path, [max_w, 20].min, logo_h)
+    end
+
+    if logo_img
+      logo_lines = logo_img.split("\n")
+      lines = logo_lines + ["", dim.render("Press enter to generate")]
+      pad_top = [(max_h - lines.length) / 2, 0].max
+      (Array.new(pad_top, "") + lines).join("\n")
+    else
+      lines = [dim.render("No image yet"), "", dim.render("Press enter to generate")]
+      pad_top = [(max_h - lines.length) / 2, 0].max
+      (Array.new(pad_top, "") + lines).join("\n")
+    end
   end
 
   def render_prompt_section(tw, box_h)
@@ -2878,6 +2892,62 @@ class Chewy
   end
 end
 
+# ---------- Logo ----------
+
+CHEWY_LOGO = <<~'ART'
+        ▄▄████▄▄
+      ▄██▀▄██▄▀██▄
+     ██▀▄█▀▀▀█▄▀██
+    ██ ▄▀ ▄▄▄ ▀▄ ██
+    ██ █ █▀ ▀█ █ ██
+    ██ ▀▄ ▀▄▀ ▄▀ ██
+     ██▄▀▀▄▄▄▀▀▄██
+      ▀██▄▄▄▄▄██▀
+        ▀▀████▀▀
+ART
+
+def print_logo
+  CHEWY_LOGO.each_line do |line|
+    puts "\e[1;35m#{line}\e[0m"
+  end
+end
+
+# ---------- Update Check ----------
+
+def check_for_updates
+  uri = URI.parse("https://api.github.com/repos/#{CHEWY_REPO}/releases/latest")
+  http = Net::HTTP.new(uri.host, uri.port)
+  http.use_ssl = true
+  http.open_timeout = 3
+  http.read_timeout = 3
+  req = Net::HTTP::Get.new(uri)
+  req["Accept"] = "application/vnd.github+json"
+  resp = http.request(req)
+  return nil unless resp.is_a?(Net::HTTPSuccess)
+
+  data = JSON.parse(resp.body)
+  latest = data["tag_name"]&.sub(/^v/, "")
+  return nil unless latest
+
+  current_parts = CHEWY_VERSION.split(".").map(&:to_i)
+  latest_parts = latest.split(".").map(&:to_i)
+  (latest_parts <=> current_parts) > 0 ? latest : nil
+rescue
+  nil
+end
+
 # ---------- Entrypoint ----------
+
+if (new_version = check_for_updates)
+  print_logo
+  puts "\e[1;35mchewy v#{CHEWY_VERSION}\e[0m -> \e[1;32mv#{new_version}\e[0m available!"
+  puts ""
+  puts "  brew upgrade Holy-Coders/chewy/chewy"
+  puts ""
+  print "Continue with current version? [Y/n] "
+  answer = $stdin.gets&.strip&.downcase
+  exit 0 if answer == "n"
+  puts ""
+end
 
 Bubbletea.run(Chewy.new, alt_screen: true)

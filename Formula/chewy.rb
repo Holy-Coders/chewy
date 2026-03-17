@@ -23,6 +23,8 @@ class Chewy < Formula
     libexec.install "chewy.rb"
     libexec.install "Gemfile"
     libexec.install "Gemfile.lock"
+    libexec.install "logo.jpeg"
+    libexec.install "VERSION"
 
     (bin/"chewy").write <<~BASH
       #!/bin/bash
@@ -30,6 +32,26 @@ class Chewy < Formula
       export GEM_PATH="#{libexec}/gems"
       exec "#{Formula["ruby"].opt_bin}/ruby" "#{libexec}/chewy.rb" "$@"
     BASH
+  end
+
+  def caveats
+    <<~EOS
+
+            ▄▄████▄▄
+          ▄██▀▄██▄▀██▄
+         ██▀▄█▀▀▀█▄▀██
+        ██ ▄▀ ▄▄▄ ▀▄ ██
+        ██ █ █▀ ▀█ █ ██
+        ██ ▀▄ ▀▄▀ ▄▀ ██
+         ██▄▀▀▄▄▄▀▀▄██
+          ▀██▄▄▄▄▄██▀
+            ▀▀████▀▀
+
+      Run `chewy` to launch the TUI.
+
+      Place models in ~/models or set CHEWY_MODELS_DIR.
+      Press ^d inside chewy to download models from HuggingFace.
+    EOS
   end
 
   test do
