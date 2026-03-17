@@ -1,0 +1,2883 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "bubbletea"
+require "lipgloss"
+require "bubbles"
+require "open3"
+require "fileutils"
+require "net/http"
+require "json"
+require "uri"
+require "yaml"
+require "chunky_png"
+require "pty"
+require "base64"
+
+# ---------- Constants ----------
+
+HF_API_BASE = "https://huggingface.co/api"
+HF_DOWNLOAD_BASE = "https://huggingface.co"
+MODEL_EXTENSIONS = %w[.gguf .safetensors .ckpt].freeze
+
+# Common macOS app model directories
+EXTRA_MODEL_DIRS = [
+  File.expand_path("~/.diffusionbee"),
+  File.expand_path("~/Library/Containers/com.liuliu.draw-things/Data/Documents/Models"),
+].freeze
+SAMPLER_OPTIONS = %w[euler euler_a dpm2 dpm2_a dpm++2s_a dpm++2m dpm++2mv2 lcm].freeze
+CONFIG_DIR = File.expand_path("~/.config/sdtui")
+CONFIG_PATH = File.join(CONFIG_DIR, "config.yml")
+PRESETS_PATH = File.join(CONFIG_DIR, "presets.yml")
+
+BUILTIN_PRESETS = {
+  "fast" => { "steps" => 10, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler" },
+  "quality" => { "steps" => 30, "cfg_scale" => 7.0, "width" => 768, "height" => 768, "sampler" => "dpm++2m" },
+  "portrait" => { "steps" => 20, "cfg_scale" => 7.0, "width" => 512, "height" => 768, "sampler" => "euler_a" },
+  "flux-fast" => { "steps" => 4, "cfg_scale" => 1.0, "width" => 512, "height" => 512, "sampler" => "euler" },
+  "flux-quality" => { "steps" => 8, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler" },
+}.freeze
+
+# FLUX companion files needed alongside the diffusion model
+FLUX_COMPANION_FILES = {
+  "clip_l" => {
+    filename: "clip_l.safetensors",
+    url: "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
+  },
+  "t5xxl" => {
+    filename: "t5xxl_fp16.safetensors",
+    url: "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors",
+  },
+  "vae" => {
+    filename: "ae.safetensors",
+    url: "https://huggingface.co/second-state/FLUX.1-schnell-GGUF/resolve/main/ae.safetensors",
+  },
+}.freeze
+
+# ---------- Theme ----------
+
+module Theme
+  PRIMARY     = "#874BFD"
+  SECONDARY   = "#7B2FFF"
+  ACCENT      = "#FF75B5"
+  SUCCESS     = "#22C55E"
+  WARNING     = "#EAB308"
+  ERROR       = "#EF4444"
+  TEXT        = "#1A1A2E"
+  TEXT_DIM    = "#555555"
+  TEXT_MUTED  = "#888888"
+  SURFACE     = "#F0F0F0"
+  BORDER_DIM  = "#AAAAAA"
+  BORDER_FOCUS = "#874BFD"
+
+  # Generate a gradient between two colors for visual flair
+  def self.gradient(c1, c2, steps)
+    Lipgloss::ColorBlend.blends(c1, c2, steps, mode: Lipgloss::ColorBlend::HCL)
+  rescue
+    Array.new(steps) { c1 }
+  end
+
+  def self.gradient_text(text, c1, c2)
+    chars = text.chars
+    return text if chars.empty?
+    colors = gradient(c1, c2, [chars.length, 2].max)
+    chars.each_with_index.map { |ch, i|
+      Lipgloss::Style.new.foreground(colors[[i, colors.length - 1].min]).render(ch)
+    }.join
+  end
+end
+
+FOCUS_PROMPT   = 0
+FOCUS_NEGATIVE = 1
+FOCUS_PARAMS   = 2
+FOCUS_COUNT    = 3
+
+# ---------- Custom Messages ----------
+
+class GenerationDoneMessage < Bubbletea::Message
+  attr_reader :output_path, :elapsed, :stderr_output
+  def initialize(output_path:, elapsed:, stderr_output: "")
+    @output_path = output_path; @elapsed = elapsed; @stderr_output = stderr_output
+  end
+end
+
+class RevealTickMessage < Bubbletea::Message
+  attr_reader :phase
+  def initialize(phase:) @phase = phase end
+end
+
+class GenerationErrorMessage < Bubbletea::Message
+  attr_reader :error, :stderr_output
+  def initialize(error:, stderr_output: "")
+    @error = error; @stderr_output = stderr_output
+  end
+end
+
+class ReposFetchedMessage < Bubbletea::Message
+  attr_reader :repos
+  def initialize(repos:) @repos = repos end
+end
+
+class ReposFetchErrorMessage < Bubbletea::Message
+  attr_reader :error
+  def initialize(error:) @error = error end
+end
+
+class FilesFetchedMessage < Bubbletea::Message
+  attr_reader :files, :repo_id
+  def initialize(files:, repo_id:) @files = files; @repo_id = repo_id end
+end
+
+class FilesFetchErrorMessage < Bubbletea::Message
+  attr_reader :error
+  def initialize(error:) @error = error end
+end
+
+class ModelDownloadDoneMessage < Bubbletea::Message
+  attr_reader :path, :filename
+  def initialize(path:, filename:) @path = path; @filename = filename end
+end
+
+class ModelDownloadErrorMessage < Bubbletea::Message
+  attr_reader :error
+  def initialize(error:) @error = error end
+end
+
+class CompanionDownloadDoneMessage < Bubbletea::Message
+  attr_reader :name
+  def initialize(name:) @name = name end
+end
+
+class CompanionDownloadErrorMessage < Bubbletea::Message
+  attr_reader :name, :error
+  def initialize(name:, error:) @name = name; @error = error end
+end
+
+class ClipboardPasteMessage < Bubbletea::Message
+  attr_reader :path, :error
+  def initialize(path: nil, error: nil) @path = path; @error = error end
+end
+
+# ---------- Main App ----------
+
+class Chewy
+  include Bubbletea::Model
+
+  def initialize
+    @config = load_config
+    @first_run = !File.exist?(CONFIG_PATH)
+    save_config if @first_run
+
+    @width = 80; @height = 24
+    @focus = FOCUS_PROMPT
+
+    # Kitty graphics protocol support (Ghostty, Kitty, WezTerm)
+    @kitty_graphics = %w[ghostty kitty WezTerm].any? { |t|
+      ENV["TERM_PROGRAM"]&.downcase&.include?(t.downcase) || ENV["TERM"]&.include?(t.downcase)
+    }
+
+    # Models
+    @models_dir = ENV["CHEWY_MODELS_DIR"] || @config["model_dir"] || File.expand_path("~/models")
+    @selected_model_path = nil
+    @model_list = nil
+    @model_paths = []
+    @pinned_models = @config["pinned_models"] || []
+    @recent_models = @config["recent_models"] || []
+
+    # Prompt + Negative
+    @prompt_input = Bubbles::TextInput.new
+    @prompt_input.placeholder = "Describe your image..."
+    @prompt_input.prompt = ""
+    @prompt_input.placeholder_style = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED).italic(true)
+    @prompt_input.text_style = Lipgloss::Style.new.foreground(Theme::TEXT)
+    @prompt_input.focus
+
+    @negative_input = Bubbles::TextInput.new
+    @negative_input.placeholder = "Negative prompt (optional)..."
+    @negative_input.prompt = ""
+    @negative_input.placeholder_style = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED).italic(true)
+    @negative_input.text_style = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+
+    # Prompt history
+    @prompt_history = []
+    @history_index = -1
+    @saved_prompt = ""
+
+    # Params
+    ds = @config["default_steps"] || 20
+    dc = (@config["default_cfg"] || 7.0).to_f
+    dw = @config["default_width"] || 512
+    dh = @config["default_height"] || 512
+    @params = { steps: ds, cfg_scale: dc, width: dw, height: dh, seed: -1, batch: 1, strength: 0.75 }
+    @sampler = @config["default_sampler"] || "euler_a"
+    @sampler_index = SAMPLER_OPTIONS.index(@sampler) || 1
+    @param_display_keys = %i[steps cfg_scale width height seed sampler batch strength]
+    @param_index = 0
+    @editing_param = false
+    @param_edit_buffer = ""
+
+    # Generation
+    @generating = false
+    @gen_pid = nil
+    @gen_cancelled = false
+    @gen_step = 0
+    @gen_total_steps = 0
+    @gen_current_batch = 0
+    @gen_total_batch = 1
+    @last_seed = nil
+    @spinner = Bubbles::Spinner.new(spinner: Bubbles::Spinners::PULSE)
+    @spinner.style = Lipgloss::Style.new.foreground(Theme::PRIMARY)
+    @progress = Bubbles::Progress.new(width: 30, gradient: [Theme::PRIMARY, Theme::ACCENT])
+    @last_output_path = nil
+    @last_generation_time = nil
+    @status_message = @first_run ? "Config created at #{CONFIG_PATH}" : nil
+    @error_message = nil
+
+    # Paths
+    bundled_sd = File.join(__dir__, "bin", "sd")
+    @sd_bin = ENV["SD_BIN"] || @config["sd_bin"] || (File.executable?(bundled_sd) ? bundled_sd : "sd")
+    @output_dir = ENV["CHEWY_OUTPUT_DIR"] || @config["output_dir"] || "outputs"
+    @lora_dir = ENV["CHEWY_LORA_DIR"] || @config["lora_dir"] || File.expand_path("~/loras")
+
+    # Overlay: nil, :models, :download, :history, :lora, :preset, :hf_token, :gallery, :fullscreen_image, :file_picker
+    @overlay = nil
+
+    # img2img
+    @init_image_path = nil
+    @file_picker_dir = File.expand_path("~")
+    @file_picker_entries = []
+    @file_picker_index = 0
+    @file_picker_scroll = 0
+
+    # Gallery
+    @gallery_images = []
+    @gallery_index = 0
+    @gallery_thumb_cache = {}
+
+    # Fullscreen image view
+    @fullscreen_image_path = nil
+
+    # HF token
+    @hf_token_input = Bubbles::TextInput.new
+    @hf_token_input.placeholder = "hf_..."
+    @hf_token_input.prompt = ""
+    @hf_token_input.placeholder_style = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED).italic(true)
+    @hf_token_input.text_style = Lipgloss::Style.new.foreground(Theme::TEXT)
+    @hf_token_pending_action = nil
+
+    # Image preview cache
+    @preview_cache = nil
+    @preview_path = nil
+
+    # Progressive reveal animation
+    @reveal_phase = nil  # nil = no animation, 0-4 = progressive phases
+    @reveal_path = nil
+
+    # Live generation preview
+    @gen_preview_path = nil
+    @gen_preview_mtime = nil
+    @gen_preview_cache = nil
+
+    # Download browser
+    @download_view = :repos
+    @remote_repos = []; @remote_files = []
+    @repo_list = nil; @file_list = nil
+    @selected_repo_id = nil
+    @fetching = false
+    @model_downloading = false
+    @download_dest = nil; @download_total = 0; @download_filename = ""
+    @download_search_input = Bubbles::TextInput.new
+    @download_search_input.placeholder = "Search HuggingFace models..."
+    @download_search_input.prompt = ""
+    @download_search_input.placeholder_style = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED).italic(true)
+    @download_search_input.text_style = Lipgloss::Style.new.foreground(Theme::TEXT)
+    @download_search_focused = false
+
+    # Generation history
+    @generation_history = []
+    @history_list = nil
+
+    # LoRA
+    @available_loras = []
+    @selected_loras = [] # [{name:, path:, weight:}]
+    @lora_index = 0
+    @editing_lora_weight = false
+    @lora_weight_buffer = ""
+
+    # Presets
+    @user_presets = load_presets
+    @preset_index = 0
+    @naming_preset = false
+    @preset_name_buffer = ""
+    @confirm_delete_preset = false
+
+    # FLUX companion downloads
+    @companion_downloading = false
+    @companion_remaining = 0
+    @companion_errors = []
+  end
+
+  # ========== Config ==========
+
+  def load_config
+    return {} unless File.exist?(CONFIG_PATH)
+    YAML.safe_load(File.read(CONFIG_PATH)) || {}
+  rescue
+    {}
+  end
+
+  def save_config
+    FileUtils.mkdir_p(CONFIG_DIR)
+    data = {
+      "model_dir" => @models_dir || File.expand_path("~/models"),
+      "output_dir" => @output_dir || "outputs",
+      "sd_bin" => @sd_bin || "sd",
+      "lora_dir" => @lora_dir || File.expand_path("~/loras"),
+      "default_steps" => @params&.dig(:steps) || 20,
+      "default_cfg" => @params&.dig(:cfg_scale) || 7.0,
+      "default_width" => @params&.dig(:width) || 512,
+      "default_height" => @params&.dig(:height) || 512,
+      "default_sampler" => @sampler || "euler_a",
+      "pinned_models" => @pinned_models || [],
+      "recent_models" => @recent_models || [],
+    }
+    File.write(CONFIG_PATH, YAML.dump(data))
+  rescue
+    nil
+  end
+
+  def load_presets
+    return {} unless File.exist?(PRESETS_PATH)
+    YAML.safe_load(File.read(PRESETS_PATH)) || {}
+  rescue
+    {}
+  end
+
+  def save_presets
+    FileUtils.mkdir_p(CONFIG_DIR)
+    File.write(PRESETS_PATH, YAML.dump(@user_presets))
+  rescue
+    nil
+  end
+
+  # ========== Init ==========
+
+  def init
+    scan_models
+    scan_loras
+    load_generation_history
+    _spinner, spinner_cmd = @spinner.init
+    [self, spinner_cmd]
+  end
+
+  # ========== Update ==========
+
+  def update(message)
+    case message
+    when Bubbletea::WindowSizeMessage
+      @width = message.width; @height = message.height
+      resize_components
+      [self, nil]
+    when Bubbles::Spinner::TickMessage
+      @spinner, cmd = @spinner.update(message)
+      [self, cmd]
+    when Bubbles::Progress::FrameMessage
+      @progress, cmd = @progress.update(message)
+      [self, cmd]
+    when GenerationDoneMessage
+      @generating = false; @gen_pid = nil; @gen_start_time = nil
+      @last_output_path = message.output_path
+      @last_generation_time = message.elapsed
+      @preview_cache = nil
+      @status_message = nil; @error_message = nil
+      load_generation_history
+      # Start progressive reveal animation
+      @reveal_phase = 0
+      @reveal_path = message.output_path
+      cmd = Bubbletea.tick(0.05) { RevealTickMessage.new(phase: 1) }
+      [self, cmd]
+    when RevealTickMessage
+      handle_reveal_tick(message)
+    when GenerationErrorMessage
+      @generating = false; @gen_pid = nil; @gen_start_time = nil
+      @error_message = message.error; @status_message = nil
+      [self, nil]
+    when ReposFetchedMessage
+      handle_repos_fetched(message)
+    when ReposFetchErrorMessage
+      @fetching = false; @error_message = "Fetch failed: #{message.error}"
+      [self, nil]
+    when FilesFetchedMessage
+      handle_files_fetched(message)
+    when FilesFetchErrorMessage
+      @fetching = false; @error_message = "Fetch failed: #{message.error}"
+      [self, nil]
+    when ModelDownloadDoneMessage
+      handle_download_done(message)
+    when ModelDownloadErrorMessage
+      @model_downloading = false; @download_dest = nil; @download_filename = ""
+      @error_message = "Download failed: #{message.error}"
+      [self, nil]
+    when CompanionDownloadDoneMessage
+      @companion_remaining -= 1
+      if @companion_remaining <= 0
+        @companion_downloading = false
+        if @companion_errors.empty?
+          @status_message = "FLUX companion files ready"
+        else
+          @error_message = "Some downloads failed: #{@companion_errors.join(', ')}"
+        end
+      end
+      [self, nil]
+    when CompanionDownloadErrorMessage
+      @companion_remaining -= 1
+      @companion_errors << "#{message.name}: #{message.error}"
+      if @companion_remaining <= 0
+        @companion_downloading = false
+        @error_message = "Download failed: #{@companion_errors.join(', ')}"
+      end
+      [self, nil]
+    when ClipboardPasteMessage
+      if message.error
+        @error_message = message.error
+      else
+        @init_image_path = message.path
+        @status_message = "Pasted image: #{File.basename(message.path)}"
+      end
+      [self, nil]
+    when Bubbletea::KeyMessage
+      handle_key(message)
+    else
+      forward_to_focused(message)
+    end
+  end
+
+  # ========== View ==========
+
+  def view
+    case @overlay
+    when :models   then render_overlay_panel("Models", render_models_content, render_models_status)
+    when :download then render_download_view
+    when :history  then render_overlay_panel("Generation History", render_history_content, render_history_status)
+    when :lora     then render_overlay_panel("LoRA Selection", render_lora_content, render_lora_status)
+    when :preset   then render_overlay_panel("Presets", render_preset_content, render_preset_status)
+    when :hf_token then render_overlay_panel("HuggingFace Token", render_hf_token_content, render_hf_token_status)
+    when :gallery  then render_gallery_view
+    when :fullscreen_image then render_fullscreen_image
+    when :file_picker then render_overlay_panel("Select Image", render_file_picker_content, render_file_picker_status)
+    else render_main_view
+    end
+  end
+
+  private
+
+  # ========== Model Scanning ==========
+
+  def scan_models
+    Dir.glob(File.join(@models_dir, "**", "*.part")).each { |f| File.delete(f) rescue nil }
+
+    companion_names = FLUX_COMPANION_FILES.values.map { |v| v[:filename] }
+    ext_glob = "*.{safetensors,gguf,ckpt}"
+
+    # Scan primary dir + any extra app directories that exist
+    dirs = [@models_dir] + EXTRA_MODEL_DIRS.select { |d| File.directory?(d) }
+    files = dirs.flat_map { |d| Dir.glob(File.join(d, "**", ext_glob)) }
+      .uniq
+      .reject { |f| companion_names.include?(File.basename(f)) }
+
+    # Sort: pinned first, recent second, rest alphabetical
+    pinned = files.select { |f| @pinned_models.include?(f) }
+    recent = files.select { |f| @recent_models.include?(f) && !@pinned_models.include?(f) }
+    rest = files - pinned - recent
+
+    sorted = pinned + recent + rest
+
+    @model_paths = sorted
+
+    items = if sorted.empty?
+      [{ title: "No models found", description: "Press d to download" }]
+    else
+      sorted.map do |f|
+        name = File.basename(f, File.extname(f))
+        ext = File.extname(f).delete(".").upcase
+        prefix = @pinned_models.include?(f) ? "* " : "  "
+        source = model_source_tag(f)
+        { title: "#{prefix}#{name}", description: "#{ext}#{source}" }
+      end
+    end
+
+    @model_list = Bubbles::List.new(items, width: @width - 8, height: [@height - 10, 6].max)
+    @model_list.show_title = false
+    @model_list.show_status_bar = false
+    @model_list.selected_item_style = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true)
+    @model_list.item_style = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+
+    @selected_model_path = sorted.first if sorted.any?
+  end
+
+  def model_source_tag(path)
+    if path.include?(".diffusionbee")
+      " | DiffusionBee"
+    elsif path.include?("draw-things")
+      " | Draw Things"
+    else
+      ""
+    end
+  end
+
+  def scan_loras
+    return unless File.directory?(@lora_dir)
+    pattern = File.join(@lora_dir, "**", "*.safetensors")
+    @available_loras = Dir.glob(pattern).map do |f|
+      { name: File.basename(f, ".safetensors"), path: f }
+    end
+  end
+
+  def load_generation_history
+    return unless File.directory?(@output_dir)
+    pattern = File.join(@output_dir, "*.json")
+    files = Dir.glob(pattern).sort.reverse
+    @generation_history = files.first(100).filter_map do |f|
+      data = JSON.parse(File.read(f))
+      data["_sidecar_path"] = f
+      data["_image_path"] = f.sub(/\.json$/, ".png")
+      data
+    rescue
+      nil
+    end
+  end
+
+  # ========== Progressive Reveal ==========
+
+  REVEAL_PHASES = 5 # phases 0..4: very blocky → full resolution
+  REVEAL_DELAYS = [0.05, 0.12, 0.15, 0.18, 0.0].freeze # delay before next phase
+
+  def handle_reveal_tick(message)
+    phase = message.phase
+    # Ignore stale ticks from cancelled/completed reveals
+    if @reveal_phase.nil? || phase >= REVEAL_PHASES || @reveal_path != @last_output_path
+      @reveal_phase = nil
+      @reveal_path = nil
+      @preview_cache = nil
+      return [self, nil]
+    end
+
+    @reveal_phase = phase
+    @preview_cache = nil # force re-render at new resolution
+    cmd = Bubbletea.tick(REVEAL_DELAYS[phase]) { RevealTickMessage.new(phase: phase + 1) }
+    [self, cmd]
+  end
+
+  # ========== Component Resizing ==========
+
+  def resize_components
+    lw = left_panel_width
+    @prompt_input.width = lw - 6
+    @negative_input.width = lw - 6
+    @progress = Bubbles::Progress.new(width: [right_panel_width - 10, 20].max, gradient: [Theme::PRIMARY, Theme::ACCENT])
+    @model_list.width = @width - 8 if @model_list
+    @model_list.height = [@height - 10, 6].max if @model_list
+    @preview_cache = nil # invalidate on resize
+    resize_download_lists if @overlay == :download
+  end
+
+  def resize_download_lists
+    w = @width - 4; h = @height - 9  # account for search bar
+    @download_search_input.width = w - 12
+    @repo_list&.width = w; @repo_list&.height = h
+    @file_list&.width = w; @file_list&.height = h
+  end
+
+  def left_panel_width = [(@width * 0.45).to_i, 36].max
+  def right_panel_width = @width - left_panel_width
+
+  # ========== Focus ==========
+
+  def cycle_focus(reverse: false)
+    case @focus
+    when FOCUS_PROMPT then @prompt_input.blur
+    when FOCUS_NEGATIVE then @negative_input.blur
+    end
+
+    @focus = reverse ? (@focus - 1) % FOCUS_COUNT : (@focus + 1) % FOCUS_COUNT
+
+    case @focus
+    when FOCUS_PROMPT then @prompt_input.focus
+    when FOCUS_NEGATIVE then @negative_input.focus
+    end
+
+    unless @focus == FOCUS_PARAMS
+      @editing_param = false; @param_edit_buffer = ""
+    end
+  end
+
+  # ========== Key Handling ==========
+
+  def handle_key(message)
+    return handle_overlay_key(message) if @overlay
+    handle_main_key(message)
+  end
+
+  def handle_main_key(message)
+    key = message.to_s
+
+    # Global shortcuts (work everywhere, including text inputs)
+    # Note: ctrl+m=Enter, ctrl+h=Backspace, ctrl+i=Tab are indistinguishable in terminals
+    case key
+    when "ctrl+c" then return [self, Bubbletea.quit]
+    when "ctrl+q" then return [self, Bubbletea.quit]
+    when "ctrl+n" then return toggle_overlay(:models)     # n = navigate models
+    when "ctrl+d" then return enter_download_mode
+    when "ctrl+g" then return toggle_overlay(:history)     # g = generation history
+    when "ctrl+l" then return toggle_overlay(:lora)
+    when "ctrl+p" then return toggle_overlay(:preset)
+    when "ctrl+a" then return toggle_overlay(:gallery)    # a = album/gallery
+    when "ctrl+o", "ctrl+e" then open_image(@last_output_path) if @last_output_path; return [self, nil]
+    when "ctrl+f" then show_fullscreen_image(@last_output_path) if @last_output_path; return [self, nil]
+    when "ctrl+r" then @params[:seed] = -1; return [self, nil]
+    when "ctrl+b" then return open_file_picker                  # b = browse init image
+    when "ctrl+v" then return paste_image_from_clipboard        # v = paste image
+    when "ctrl+u" then @init_image_path = nil; @status_message = "Init image cleared"; return [self, nil]
+    when "ctrl+x" then if @generating && @gen_pid; @gen_cancelled = true; Process.kill("TERM", @gen_pid) rescue nil; end; return [self, nil]
+    when "tab"    then cycle_focus; return [self, nil]
+    when "shift+tab" then cycle_focus(reverse: true); return [self, nil]
+    end
+
+    case @focus
+    when FOCUS_PROMPT  then handle_prompt_key(message)
+    when FOCUS_NEGATIVE then handle_negative_key(message)
+    when FOCUS_PARAMS  then handle_params_key(message)
+    else [self, nil]
+    end
+  end
+
+  def handle_prompt_key(message)
+    key = message.to_s
+    case key
+    when "enter" then return start_generation
+    when "up"    then history_prev; return [self, nil]
+    when "down"  then history_next; return [self, nil]
+    end
+    @prompt_input, cmd = @prompt_input.update(message)
+    [self, cmd]
+  end
+
+  def handle_negative_key(message)
+    key = message.to_s
+    return start_generation if key == "enter"
+    @negative_input, cmd = @negative_input.update(message)
+    [self, cmd]
+  end
+
+  def handle_params_key(message)
+    key = message.to_s
+    current_key = @param_display_keys[@param_index]
+
+    if @editing_param
+      case key
+      when "enter"
+        commit_param_edit; return [self, nil]
+      when "esc"
+        @editing_param = false; @param_edit_buffer = ""; return [self, nil]
+      when "backspace"
+        @param_edit_buffer = @param_edit_buffer[0...-1]; return [self, nil]
+      else
+        @param_edit_buffer += key if key.match?(/\A[\d.\-]\z/)
+        return [self, nil]
+      end
+    end
+
+    case key
+    when "up", "k"
+      @param_index = (@param_index - 1) % @param_display_keys.length
+    when "down", "j"
+      @param_index = (@param_index + 1) % @param_display_keys.length
+    when "enter"
+      if current_key == :sampler
+        @sampler_index = (@sampler_index + 1) % SAMPLER_OPTIONS.length
+        @sampler = SAMPLER_OPTIONS[@sampler_index]
+      else
+        @editing_param = true
+        @param_edit_buffer = param_value(current_key).to_s
+      end
+    when "left"
+      if current_key == :sampler
+        @sampler_index = (@sampler_index - 1) % SAMPLER_OPTIONS.length
+        @sampler = SAMPLER_OPTIONS[@sampler_index]
+      end
+    when "right"
+      if current_key == :sampler
+        @sampler_index = (@sampler_index + 1) % SAMPLER_OPTIONS.length
+        @sampler = SAMPLER_OPTIONS[@sampler_index]
+      end
+    end
+    [self, nil]
+  end
+
+  def param_value(key)
+    key == :sampler ? @sampler : @params[key]
+  end
+
+  def commit_param_edit
+    key = @param_display_keys[@param_index]
+    return if key == :sampler
+
+    current = @params[key]
+    new_val = current.is_a?(Float) ? @param_edit_buffer.to_f : @param_edit_buffer.to_i
+
+    if key == :seed
+      @params[key] = new_val
+    elsif key == :batch
+      @params[key] = new_val.clamp(1, 9)
+    elsif key == :strength
+      @params[key] = new_val.to_f.clamp(0.01, 1.0)
+    elsif new_val > 0
+      @params[key] = new_val
+    end
+    @editing_param = false; @param_edit_buffer = ""
+  end
+
+  # ========== Prompt History ==========
+
+  def add_to_prompt_history(text)
+    return if text.empty?
+    @prompt_history.pop if @prompt_history.last == text
+    @prompt_history << text
+    @prompt_history.shift if @prompt_history.length > 100
+    @history_index = -1
+  end
+
+  def history_prev
+    return if @prompt_history.empty?
+    if @history_index == -1
+      @saved_prompt = @prompt_input.value
+      @history_index = @prompt_history.length - 1
+    elsif @history_index > 0
+      @history_index -= 1
+    else
+      return
+    end
+    @prompt_input.value = @prompt_history[@history_index]
+  end
+
+  def history_next
+    return if @history_index == -1
+    if @history_index < @prompt_history.length - 1
+      @history_index += 1
+      @prompt_input.value = @prompt_history[@history_index]
+    else
+      @history_index = -1
+      @prompt_input.value = @saved_prompt
+    end
+  end
+
+  # ========== Pinned / Recent Models ==========
+
+  def toggle_pin(path)
+    if @pinned_models.include?(path)
+      @pinned_models.delete(path)
+    else
+      @pinned_models << path
+    end
+    save_config
+    scan_models
+  end
+
+  def add_recent_model(path)
+    @recent_models.delete(path)
+    @recent_models.unshift(path)
+    @recent_models = @recent_models.first(5)
+    save_config
+  end
+
+  # ========== FLUX Support ==========
+
+  def flux_model?(path)
+    return false unless path
+    basename = File.basename(path).downcase
+    basename.include?("flux")
+  end
+
+  def flux_companion_path(key)
+    info = FLUX_COMPANION_FILES[key]
+    return nil unless info
+    File.join(@models_dir, info[:filename])
+  end
+
+  def flux_companions_present?
+    FLUX_COMPANION_FILES.all? { |key, _| File.exist?(flux_companion_path(key)) }
+  end
+
+  def missing_flux_companions
+    FLUX_COMPANION_FILES.select { |key, _| !File.exist?(flux_companion_path(key)) }
+  end
+
+  HF_TOKEN_PATHS = [
+    File.expand_path("~/.cache/huggingface/token"),
+    File.expand_path("~/.huggingface/token"),
+  ].freeze
+
+  def resolve_hf_token
+    ENV["HF_TOKEN"] || ENV["HUGGING_FACE_HUB_TOKEN"] || HF_TOKEN_PATHS.filter_map { |p|
+      File.read(p).strip if File.exist?(p)
+    }.first
+  end
+
+  def save_hf_token(token)
+    dir = File.dirname(HF_TOKEN_PATHS.first)
+    FileUtils.mkdir_p(dir)
+    File.write(HF_TOKEN_PATHS.first, token)
+  end
+
+  def download_flux_companions
+    missing = missing_flux_companions
+    return [self, nil] if missing.empty?
+
+    hf_token = resolve_hf_token
+    unless hf_token
+      @hf_token_pending_action = :flux_companions
+      return open_overlay(:hf_token)
+    end
+
+    @companion_downloading = true
+    @companion_remaining = missing.size
+    @companion_errors = []
+    @status_message = "Downloading #{missing.size} FLUX companion file(s)..."
+
+    cmds = missing.map do |name, info|
+      dest = File.join(@models_dir, info[:filename])
+      part = "#{dest}.part"
+      url = info[:url]
+      Proc.new do
+        curl_args = ["curl", "-fL", "-o", part, "-sS",
+                     "-H", "Authorization: Bearer #{hf_token}", url]
+        _out, err, st = Open3.capture3(*curl_args)
+        if st.success?
+          File.rename(part, dest)
+          CompanionDownloadDoneMessage.new(name: name)
+        else
+          File.delete(part) if File.exist?(part)
+          CompanionDownloadErrorMessage.new(name: name, error: "curl failed: #{err.strip}")
+        end
+      rescue => e
+        File.delete(part) rescue nil
+        CompanionDownloadErrorMessage.new(name: name, error: e.message)
+      end
+    end
+
+    [self, Bubbletea::BatchCommand.new(cmds)]
+  end
+
+  # ========== Generation ==========
+
+  def start_generation
+    prompt_text = @prompt_input.value.strip
+    negative_text = @negative_input.value.strip
+
+    if prompt_text.empty?
+      @error_message = "Prompt cannot be empty"; return [self, nil]
+    end
+    unless @selected_model_path
+      @error_message = "No model selected"; return [self, nil]
+    end
+    return [self, nil] if @generating
+
+    # FLUX: check companion files first
+    if flux_model?(@selected_model_path) && !flux_companions_present?
+      return download_flux_companions
+    end
+
+    @generating = true
+    @gen_cancelled = false
+    @gen_step = 0; @gen_total_steps = 0; @gen_status = "Starting..."
+    @gen_start_time = Time.now; @gen_sampling_start = nil
+    @reveal_phase = nil; @reveal_path = nil  # cancel any in-progress reveal
+    @gen_current_batch = 0
+    @gen_total_batch = @params[:batch]
+    @last_seed = nil
+    @error_message = nil; @status_message = nil
+
+    add_to_prompt_history(prompt_text)
+    add_recent_model(@selected_model_path)
+
+    full_prompt = prompt_text
+    if @selected_loras.any?
+      tags = @selected_loras.map { |l| "<lora:#{l[:name]}:#{l[:weight]}>" }
+      full_prompt = "#{prompt_text} #{tags.join(' ')}"
+    end
+
+    FileUtils.mkdir_p(@output_dir)
+
+    # Capture for thread safety
+    sd_bin = @sd_bin; model = @selected_model_path
+    prompt = full_prompt; negative = negative_text
+    steps = @params[:steps]; cfg = @params[:cfg_scale]
+    w = @params[:width]; h = @params[:height]
+    base_seed = @params[:seed]; sampler = @sampler
+    output_dir = @output_dir; batch_count = @params[:batch]
+    lora_dir = @lora_dir; has_loras = @selected_loras.any?
+    is_flux = flux_model?(model)
+    flux_clip_l = flux_companion_path("clip_l")
+    flux_t5xxl = flux_companion_path("t5xxl")
+    flux_vae = flux_companion_path("vae")
+    init_img = @init_image_path
+    strength = @params[:strength]
+
+    sidecar_base = {
+      "prompt" => prompt_text, "negative_prompt" => negative_text,
+      "model" => model, "steps" => steps, "cfg_scale" => cfg,
+      "width" => w, "height" => h, "sampler" => sampler,
+      "model_type" => is_flux ? "flux" : "sd",
+    }
+    sidecar_base["init_image"] = init_img if init_img
+    sidecar_base["strength"] = strength if init_img
+
+    cmd = Proc.new do
+      last_output = nil; last_elapsed = nil
+      error_result = nil; total_start = Time.now
+      preview_path = File.join(output_dir, ".preview_#{Process.pid}.png")
+
+      batch_count.times do |i|
+        break if @gen_cancelled
+
+        @gen_current_batch = i + 1
+        @gen_step = 0; @gen_total_steps = 0
+
+        seed = base_seed == -1 ? -1 : base_seed + i
+        timestamp = Time.now.strftime("%Y%m%d_%H%M%S")
+        output_path = File.join(output_dir, "#{timestamp}.png")
+
+        @gen_preview_path = preview_path
+        @gen_preview_mtime = nil
+        @gen_preview_cache = nil
+
+        args = if is_flux
+          [sd_bin, "--diffusion-model", model,
+           "--clip_l", flux_clip_l, "--t5xxl", flux_t5xxl, "--vae", flux_vae,
+           "-p", prompt,
+           "--steps", steps.to_s, "--cfg-scale", cfg.to_s,
+           "-W", w.to_s, "-H", h.to_s,
+           "--seed", seed.to_s, "--sampling-method", sampler,
+           "-o", output_path]
+        else
+          [sd_bin, "-m", model, "-p", prompt,
+           "--steps", steps.to_s, "--cfg-scale", cfg.to_s,
+           "-W", w.to_s, "-H", h.to_s,
+           "--seed", seed.to_s, "--sampling-method", sampler,
+           "-o", output_path]
+        end
+        args += ["--preview", "proj", "--preview-path", preview_path, "--preview-interval", "1"]
+        args += ["--negative-prompt", negative] unless negative.empty?
+        args += ["--lora-model-dir", lora_dir] if has_loras && !is_flux
+        if init_img
+          args += ["--init-img", init_img, "--strength", strength.to_s]
+        end
+
+        begin
+          start_time = Time.now
+          pty_r, _pty_w, pid = PTY.spawn(*args)
+          @gen_pid = pid
+
+          all_output = +""; parsed_seed = nil; sampling_started = false
+          buf = +""
+          status = nil
+
+          # Single-thread loop: read output + check if process exited
+          loop do
+            ready = IO.select([pty_r], nil, nil, 0.25)
+            if ready
+              begin
+                chunk = pty_r.readpartial(4096)
+                buf << chunk
+                all_output << chunk
+                parse_sd_output(buf, sampling_started, parsed_seed) { |new_buf, ss, ps|
+                  buf = new_buf; sampling_started = ss; parsed_seed = ps
+                }
+              rescue Errno::EIO, EOFError
+                break
+              end
+            end
+            # Non-blocking check if process exited
+            begin
+              _, status = Process.waitpid2(pid, Process::WNOHANG)
+              if status
+                # Drain remaining output
+                loop do
+                  chunk = pty_r.readpartial(4096)
+                  all_output << chunk
+                  buf << chunk
+                  parse_sd_output(buf, sampling_started, parsed_seed) { |new_buf, ss, ps|
+                    buf = new_buf; sampling_started = ss; parsed_seed = ps
+                  }
+                rescue Errno::EIO, EOFError
+                  break
+                end
+                break
+              end
+            rescue Errno::ECHILD
+              break
+            end
+          end
+
+          # If we broke out before reaping (e.g. EIO), wait now
+          _, status = Process.wait2(pid) rescue nil unless status
+          pty_r.close rescue nil
+          @gen_pid = nil
+          elapsed = (Time.now - start_time).round(1)
+
+          if @gen_cancelled || status&.signaled?
+            File.delete(output_path) if File.exist?(output_path)
+            File.delete(preview_path) if File.exist?(preview_path)
+            break
+          end
+
+          if status&.success? || (status.nil? && File.exist?(output_path) && File.size(output_path) > 0)
+            @last_seed = parsed_seed
+            last_output = output_path; last_elapsed = elapsed
+
+            sidecar_path = output_path.sub(/\.png$/, ".json")
+            unless File.exist?(sidecar_path)
+              sidecar = sidecar_base.merge(
+                "seed" => parsed_seed || seed,
+                "timestamp" => Time.now.iso8601,
+                "generation_time_seconds" => elapsed
+              )
+              File.write(sidecar_path, JSON.pretty_generate(sidecar))
+            end
+          else
+            exit_code = status&.exitstatus || "unknown"
+            last_line = all_output.lines.last&.strip || "unknown"
+            hint = if all_output.include?("new_sd_ctx_t failed")
+              "Model may not support this operation — try a different model"
+            end
+            msg = hint || "Failed (exit #{exit_code}): #{last_line}"
+            error_result = GenerationErrorMessage.new(
+              error: msg,
+              stderr_output: all_output
+            )
+            break
+          end
+        rescue Errno::ENOENT
+          @gen_pid = nil
+          error_result = GenerationErrorMessage.new(
+            error: "Binary '#{sd_bin}' not found. Set SD_BIN env var.", stderr_output: ""
+          )
+          break
+        rescue => e
+          @gen_pid = nil
+          error_result = GenerationErrorMessage.new(error: e.message, stderr_output: "")
+          break
+        end
+      end
+
+      # Clean up preview file
+      File.delete(preview_path) if preview_path && File.exist?(preview_path)
+      @gen_preview_path = nil
+      @gen_preview_mtime = nil
+      @gen_preview_cache = nil
+
+      if @gen_cancelled
+        @gen_cancelled = false
+        GenerationErrorMessage.new(error: "Cancelled", stderr_output: "")
+      elsif error_result
+        error_result
+      elsif last_output
+        GenerationDoneMessage.new(
+          output_path: last_output,
+          elapsed: (Time.now - total_start).round(1),
+          stderr_output: ""
+        )
+      else
+        GenerationErrorMessage.new(error: "No images generated", stderr_output: "")
+      end
+    end
+
+    [self, cmd]
+  end
+
+  def open_image(path)
+    opener = RUBY_PLATFORM.include?("darwin") ? "open" : "xdg-open"
+    spawn(opener, path, [:out, :err] => "/dev/null")
+  end
+
+  # ========== SD Output Parsing ==========
+
+  def parse_sd_output(buf, sampling_started, parsed_seed)
+    clean = buf.gsub(/\e\[[0-9;]*[A-Za-z]/, "")
+    segments = clean.split(/[\r\n]+/)
+    new_buf = clean.end_with?("\r", "\n") ? +"" : (segments.pop || +"")
+    segments.each do |seg|
+      stripped = seg.strip
+      next if stripped.empty?
+      if seg =~ /\[INFO\s*\]\s*\S+\s*-\s*(.+)/
+        info = $1.strip
+        if info =~ /loading model/i
+          @gen_status = "Loading model..."
+        elsif info =~ /load .+ using (\w+)/i
+          @gen_status = "Loading (#{$1})..."
+        elsif info =~ /Version:\s*(.+)/
+          @gen_status = "Model: #{$1.strip}"
+        elsif info =~ /total params memory size\s*=\s*([\d.]+\s*\w+)/
+          @gen_status = "Model loaded (#{$1})"
+        elsif info =~ /sampling using (.+) method/i
+          @gen_status = "Sampler: #{$1}"
+        elsif info =~ /generating image.*seed\s+(\d+)/i
+          parsed_seed = $1.to_i
+          sampling_started = true
+          @gen_step = 0; @gen_total_steps = 0
+          @gen_sampling_start = Time.now
+          @gen_status = "Sampling (seed #{$1})..."
+        elsif info =~ /sampling completed/i
+          @gen_status = "Decoding latents..."
+        elsif info =~ /save result/i
+          @gen_status = "Saving image..."
+        end
+      end
+      if !sampling_started && seg =~ /seed\s+(\d+)/i
+        parsed_seed = $1.to_i
+        sampling_started = true
+        @gen_step = 0; @gen_total_steps = 0
+        @gen_sampling_start = Time.now
+      end
+      if sampling_started && seg =~ /(\d+)\s*\/\s*(\d+)\s*-\s*[\d.]+\s*(?:s\/it|it\/s)/
+        @gen_step = $1.to_i; @gen_total_steps = $2.to_i
+      end
+    end
+    yield new_buf, sampling_started, parsed_seed
+  end
+
+  # ========== Forward Messages ==========
+
+  def forward_to_focused(message)
+    # Forward to active overlay inputs first
+    if @overlay == :download && @download_search_focused
+      @download_search_input, cmd = @download_search_input.update(message)
+      return [self, cmd]
+    end
+    if @overlay == :hf_token
+      @hf_token_input, cmd = @hf_token_input.update(message)
+      return [self, cmd]
+    end
+
+    case @focus
+    when FOCUS_PROMPT
+      @prompt_input, cmd = @prompt_input.update(message)
+      [self, cmd]
+    when FOCUS_NEGATIVE
+      @negative_input, cmd = @negative_input.update(message)
+      [self, cmd]
+    else
+      [self, nil]
+    end
+  end
+
+  # ========== Overlay Management ==========
+
+  def toggle_overlay(name)
+    if @overlay == name
+      close_overlay
+    else
+      open_overlay(name)
+    end
+  end
+
+  def open_overlay(name)
+    case @focus
+    when FOCUS_PROMPT then @prompt_input.blur
+    when FOCUS_NEGATIVE then @negative_input.blur
+    end
+    @overlay = name
+    @error_message = nil
+
+    case name
+    when :models then scan_models
+    when :history then build_history_list
+    when :lora then scan_loras
+    when :hf_token then @hf_token_input.focus
+    when :preset then nil
+    when :gallery then build_gallery
+    when :file_picker then scan_file_picker_dir
+    end
+    [self, nil]
+  end
+
+  def close_overlay
+    @hf_token_input.blur if @overlay == :hf_token
+    clear_kitty_images if @kitty_graphics
+    @overlay = nil
+    @error_message = nil
+    @preview_cache = nil # force re-render of main preview
+    case @focus
+    when FOCUS_PROMPT then @prompt_input.focus
+    when FOCUS_NEGATIVE then @negative_input.focus
+    end
+    [self, nil]
+  end
+
+  # ========== Download Browser ==========
+
+  def enter_download_mode
+    case @focus
+    when FOCUS_PROMPT then @prompt_input.blur
+    when FOCUS_NEGATIVE then @negative_input.blur
+    end
+    @overlay = :download; @download_view = :repos
+    @error_message = nil; @fetching = true
+    @download_search_input.value = "gguf"
+    @download_search_input.focus
+    @download_search_focused = true
+    [self, fetch_repos_cmd("gguf")]
+  end
+
+  def exit_download_mode
+    @overlay = nil; @download_view = :repos; @fetching = false
+    @repo_list = nil; @file_list = nil
+    @remote_repos = []; @remote_files = []; @selected_repo_id = nil; @error_message = nil
+    @download_search_input.blur; @download_search_focused = false
+    case @focus
+    when FOCUS_PROMPT then @prompt_input.focus
+    when FOCUS_NEGATIVE then @negative_input.focus
+    end
+    [self, nil]
+  end
+
+  def fetch_repos_cmd(query = "gguf")
+    search = URI.encode_www_form_component(query)
+    Proc.new do
+      uri = URI.parse("#{HF_API_BASE}/models?pipeline_tag=text-to-image&search=#{search}&sort=downloads&direction=-1&limit=25")
+      repos = JSON.parse(hf_get(uri).body)
+      ReposFetchedMessage.new(repos: repos)
+    rescue => e
+      ReposFetchErrorMessage.new(error: e.message)
+    end
+  end
+
+  def handle_repos_fetched(message)
+    @fetching = false; @remote_repos = message.repos
+    items = @remote_repos.map do |r|
+      { title: r["id"], description: "#{format_number(r["downloads"] || 0)} downloads" }
+    end
+    items = [{ title: "No models found", description: "Try again later" }] if items.empty?
+    @repo_list = Bubbles::List.new(items, width: @width - 4, height: @height - 9)
+    @repo_list.title = ""
+    @repo_list.show_status_bar = false
+    [self, nil]
+  end
+
+  def fetch_files_cmd(repo_id)
+    @fetching = true; @selected_repo_id = repo_id
+    Proc.new do
+      uri = URI.parse("#{HF_API_BASE}/models/#{repo_id}/tree/main")
+      all = JSON.parse(hf_get(uri).body)
+      model_files = all.select { |f| f["type"] == "file" && MODEL_EXTENSIONS.any? { |ext| f["path"].end_with?(ext) } }
+      FilesFetchedMessage.new(files: model_files, repo_id: repo_id)
+    rescue => e
+      FilesFetchErrorMessage.new(error: e.message)
+    end
+  end
+
+  def handle_files_fetched(message)
+    @fetching = false; @download_view = :files; @remote_files = message.files
+    items = @remote_files.map { |f| { title: f["path"], description: f["size"] ? format_bytes(f["size"]) : "unknown" } }
+    items = [{ title: "No model files found", description: "No .gguf or .safetensors" }] if items.empty?
+    @file_list = Bubbles::List.new(items, width: @width - 4, height: @height - 9)
+    @file_list.title = ""
+    @file_list.show_status_bar = false
+    [self, nil]
+  end
+
+  def start_model_download(repo_id, filename, size)
+    FileUtils.mkdir_p(@models_dir)
+    dest = File.join(@models_dir, filename); part = "#{dest}.part"
+    @model_downloading = true; @download_dest = part
+    @download_total = size || 0; @download_filename = filename; @error_message = nil
+    url = "#{HF_DOWNLOAD_BASE}/#{repo_id}/resolve/main/#{URI.encode_www_form_component(filename)}"
+    Proc.new do
+      _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s", url)
+      if st.success?
+        File.rename(part, dest)
+        ModelDownloadDoneMessage.new(path: dest, filename: filename)
+      else
+        File.delete(part) if File.exist?(part)
+        ModelDownloadErrorMessage.new(error: "curl failed (exit #{st.exitstatus}): #{err.strip}")
+      end
+    rescue Errno::ENOENT
+      File.delete(part) if File.exist?(part)
+      ModelDownloadErrorMessage.new(error: "curl not found")
+    rescue => e
+      File.delete(part) rescue nil
+      ModelDownloadErrorMessage.new(error: e.message)
+    end
+  end
+
+  def handle_download_done(message)
+    @model_downloading = false; @download_dest = nil; @download_filename = ""
+    @status_message = "Downloaded #{message.filename}"; @error_message = nil
+    scan_models
+    [self, nil]
+  end
+
+  # ========== Overlay Key Handling ==========
+
+  def handle_overlay_key(message)
+    key = message.to_s
+    return [self, Bubbletea.quit] if key == "ctrl+c"
+
+    case @overlay
+    when :models   then handle_models_panel_key(message)
+    when :download then handle_download_key(message)
+    when :history  then handle_history_panel_key(message)
+    when :lora     then handle_lora_panel_key(message)
+    when :preset   then handle_preset_panel_key(message)
+    when :hf_token then handle_hf_token_key(message)
+    when :gallery  then handle_gallery_key(message)
+    when :fullscreen_image then handle_fullscreen_key(message)
+    when :file_picker then handle_file_picker_key(message)
+    else [self, nil]
+    end
+  end
+
+  # -- Model picker keys --
+
+  def handle_models_panel_key(message)
+    key = message.to_s
+    return close_overlay if key == "esc" || key == "q"
+    return [self, nil] unless @model_list
+
+    case key
+    when "enter"
+      idx = @model_list.selected_index rescue 0
+      if @model_paths&.any? && idx < @model_paths.length
+        @selected_model_path = @model_paths[idx]
+        @preview_cache = nil # invalidate preview when model changes
+      end
+      return close_overlay
+    when "f"
+      idx = @model_list.selected_index rescue 0
+      if @model_paths&.any? && idx < @model_paths.length
+        toggle_pin(@model_paths[idx])
+      end
+      return [self, nil]
+    when "d"
+      return enter_download_mode
+    when "delete", "backspace"
+      return delete_selected_model
+    end
+
+    @model_list, cmd = @model_list.update(message)
+    [self, cmd]
+  end
+
+  def delete_selected_model
+    idx = @model_list.selected_index rescue 0
+    return [self, nil] unless @model_paths&.any? && idx < @model_paths.length
+
+    path = @model_paths[idx]
+    return [self, nil] unless File.exist?(path)
+
+    size = File.size(path)
+    File.delete(path)
+    @selected_model_path = nil if @selected_model_path == path
+    @status_message = "Deleted #{File.basename(path)} (#{format_bytes(size)})"
+    scan_models
+    [self, nil]
+  end
+
+  # -- Download keys --
+
+  def handle_download_key(message)
+    key = message.to_s
+    case key
+    when "esc"
+      return [self, nil] if @model_downloading
+      if @download_search_focused
+        @download_search_input.blur
+        @download_search_focused = false
+        return [self, nil]
+      end
+      return @download_view == :files ? back_to_repos : exit_download_mode
+    when "q"
+      return [self, nil] if @model_downloading || @download_search_focused
+      return @download_view == :files ? back_to_repos : exit_download_mode
+    when "tab"
+      if @download_view == :repos
+        @download_search_focused = !@download_search_focused
+        @download_search_focused ? @download_search_input.focus : @download_search_input.blur
+        return [self, nil]
+      end
+    end
+    return [self, nil] if @fetching || @model_downloading
+
+    if @download_search_focused
+      return handle_download_search_key(message)
+    end
+
+    case @download_view
+    when :repos then handle_repo_list_key(message)
+    when :files then handle_file_list_key(message)
+    else [self, nil]
+    end
+  end
+
+  def handle_download_search_key(message)
+    key = message.to_s
+    if key == "enter"
+      query = @download_search_input.value.strip
+      return [self, nil] if query.empty?
+      @fetching = true
+      @download_search_input.blur
+      @download_search_focused = false
+      return [self, fetch_repos_cmd(query)]
+    end
+    @download_search_input, cmd = @download_search_input.update(message)
+    [self, cmd]
+  end
+
+  def back_to_repos
+    @download_view = :repos; @file_list = nil; @remote_files = []
+    @selected_repo_id = nil; @error_message = nil
+    @download_search_focused = false; @download_search_input.blur
+    [self, nil]
+  end
+
+  def handle_repo_list_key(message)
+    return [self, nil] unless @repo_list
+    if message.to_s == "enter"
+      item = @repo_list.selected_item
+      return [self, fetch_files_cmd(item[:title])] if item && item[:title] != "No models found"
+      return [self, nil]
+    end
+    @repo_list, cmd = @repo_list.update(message)
+    [self, cmd]
+  end
+
+  def handle_file_list_key(message)
+    return [self, nil] unless @file_list
+    if message.to_s == "enter"
+      item = @file_list.selected_item
+      if item && item[:title] != "No model files found"
+        fd = @remote_files.find { |f| f["path"] == item[:title] }
+        return [self, start_model_download(@selected_repo_id, item[:title], fd&.dig("size") || 0)]
+      end
+      return [self, nil]
+    end
+    @file_list, cmd = @file_list.update(message)
+    [self, cmd]
+  end
+
+  # -- History keys --
+
+  def build_history_list
+    items = @generation_history.map do |h|
+      prompt = (h["prompt"] || "?")[0, 40]
+      model = File.basename(h["model"] || "?")
+      seed = h["seed"] || "?"
+      { title: prompt, description: "#{model} | seed:#{seed} | #{(h["timestamp"] || "?")[0, 19]}" }
+    end
+    items = [{ title: "No history", description: "Generate an image first" }] if items.empty?
+    @history_list = Bubbles::List.new(items, width: @width - 4, height: @height - 6)
+    @history_list.title = "Generation History"
+    @history_list.show_status_bar = false
+  end
+
+  def handle_history_panel_key(message)
+    key = message.to_s
+    return close_overlay if key == "esc" || key == "q"
+    return [self, nil] unless @history_list
+
+    if key == "enter" && @generation_history.any?
+      idx = @history_list.selected_index rescue 0
+      entry = @generation_history[idx]
+      load_from_history(entry) if entry
+      return close_overlay
+    end
+
+    @history_list, cmd = @history_list.update(message)
+    [self, cmd]
+  end
+
+  def load_from_history(entry)
+    @prompt_input.value = entry["prompt"] || ""
+    @negative_input.value = entry["negative_prompt"] || ""
+    @params[:steps] = entry["steps"] || 20
+    @params[:cfg_scale] = (entry["cfg_scale"] || 7.0).to_f
+    @params[:width] = entry["width"] || 512
+    @params[:height] = entry["height"] || 512
+    @params[:seed] = entry["seed"] || -1
+    @sampler = entry["sampler"] || "euler_a"
+    @sampler_index = SAMPLER_OPTIONS.index(@sampler) || 1
+    if entry["model"] && File.exist?(entry["model"])
+      @selected_model_path = entry["model"]
+    end
+  end
+
+  # -- Gallery keys --
+
+  def build_gallery
+    return unless File.directory?(@output_dir)
+
+    pngs = Dir.glob(File.join(@output_dir, "*.png")).sort.reverse
+    @gallery_images = pngs.first(200).map do |png|
+      json = png.sub(/\.png$/, ".json")
+      meta = File.exist?(json) ? (JSON.parse(File.read(json)) rescue {}) : {}
+      { path: png, meta: meta }
+    end
+    @gallery_index = 0
+    @gallery_thumb_cache = {}
+  end
+
+  def handle_gallery_key(message)
+    key = message.to_s
+    return close_overlay if key == "esc" || key == "q"
+    return [self, nil] if @gallery_images.empty?
+
+    case key
+    when "up", "k"
+      @gallery_index = (@gallery_index - 1) % @gallery_images.length
+    when "down", "j"
+      @gallery_index = (@gallery_index + 1) % @gallery_images.length
+    when "left", "h"
+      @gallery_index = (@gallery_index - 1) % @gallery_images.length
+    when "right", "l"
+      @gallery_index = (@gallery_index + 1) % @gallery_images.length
+    when "enter", " "
+      show_fullscreen_image(@gallery_images[@gallery_index][:path])
+      return [self, nil]
+    when "ctrl+e", "ctrl+o"
+      open_image(@gallery_images[@gallery_index][:path])
+    when "delete", "backspace"
+      delete_gallery_image
+    end
+    [self, nil]
+  end
+
+  def delete_gallery_image
+    return if @gallery_images.empty?
+
+    entry = @gallery_images[@gallery_index]
+    File.delete(entry[:path]) if File.exist?(entry[:path])
+    json = entry[:path].sub(/\.png$/, ".json")
+    File.delete(json) if File.exist?(json)
+    @gallery_thumb_cache.delete(entry[:path])
+    @gallery_images.delete_at(@gallery_index)
+    @gallery_index = [[@gallery_index, @gallery_images.length - 1].min, 0].max
+    load_generation_history
+  end
+
+  # -- Fullscreen image view --
+
+  def show_fullscreen_image(path)
+    return unless path && File.exist?(path)
+    @fullscreen_image_path = path
+    @fullscreen_return_to = @overlay  # remember where we came from
+    clear_kitty_images if @kitty_graphics
+    @overlay = :fullscreen_image
+  end
+
+  def handle_fullscreen_key(message)
+    # Any key exits fullscreen
+    clear_kitty_images if @kitty_graphics
+    @fullscreen_image_path = nil
+    @overlay = @fullscreen_return_to
+    @fullscreen_return_to = nil
+    @preview_cache = nil
+    unless @overlay
+      case @focus
+      when FOCUS_PROMPT then @prompt_input.focus
+      when FOCUS_NEGATIVE then @negative_input.focus
+      end
+    end
+    [self, nil]
+  end
+
+  # -- LoRA keys --
+
+  def handle_lora_panel_key(message)
+    key = message.to_s
+    return close_overlay if (key == "esc" || key == "q") && !@editing_lora_weight
+
+    if @editing_lora_weight
+      case key
+      when "enter"
+        val = @lora_weight_buffer.to_f.clamp(0.0, 2.0)
+        sel = @selected_loras.find { |l| l[:path] == @available_loras[@lora_index][:path] }
+        sel[:weight] = val if sel
+        @editing_lora_weight = false; @lora_weight_buffer = ""
+      when "esc"
+        @editing_lora_weight = false; @lora_weight_buffer = ""
+      when "backspace"
+        @lora_weight_buffer = @lora_weight_buffer[0...-1]
+      else
+        @lora_weight_buffer += key if key.match?(/\A[\d.]\z/)
+      end
+      return [self, nil]
+    end
+
+    case key
+    when "up", "k"
+      @lora_index = (@lora_index - 1) % [@available_loras.length, 1].max
+    when "down", "j"
+      @lora_index = (@lora_index + 1) % [@available_loras.length, 1].max
+    when "enter", " "
+      toggle_lora_selection(@lora_index)
+    when "w"
+      lora = @available_loras[@lora_index]
+      if lora && @selected_loras.any? { |l| l[:path] == lora[:path] }
+        sel = @selected_loras.find { |l| l[:path] == lora[:path] }
+        @editing_lora_weight = true; @lora_weight_buffer = sel[:weight].to_s
+      end
+    when "+"
+      adjust_lora_weight(@lora_index, 0.1)
+    when "-"
+      adjust_lora_weight(@lora_index, -0.1)
+    end
+    [self, nil]
+  end
+
+  def toggle_lora_selection(idx)
+    return if idx >= @available_loras.length
+    lora = @available_loras[idx]
+    existing = @selected_loras.find_index { |l| l[:path] == lora[:path] }
+    if existing
+      @selected_loras.delete_at(existing)
+    else
+      @selected_loras << { name: lora[:name], path: lora[:path], weight: 1.0 }
+    end
+  end
+
+  def adjust_lora_weight(idx, delta)
+    return if idx >= @available_loras.length
+    lora = @available_loras[idx]
+    sel = @selected_loras.find { |l| l[:path] == lora[:path] }
+    sel[:weight] = (sel[:weight] + delta).round(1).clamp(0.0, 2.0) if sel
+  end
+
+  # -- Preset keys --
+
+  def handle_preset_panel_key(message)
+    key = message.to_s
+
+    if @naming_preset
+      case key
+      when "enter"
+        save_user_preset(@preset_name_buffer) unless @preset_name_buffer.strip.empty?
+        @naming_preset = false; @preset_name_buffer = ""
+      when "esc"
+        @naming_preset = false; @preset_name_buffer = ""
+      when "backspace"
+        @preset_name_buffer = @preset_name_buffer[0...-1]
+      else
+        @preset_name_buffer += key if key.length == 1 && key.match?(/[a-zA-Z0-9_ \-]/)
+      end
+      return [self, nil]
+    end
+
+    if @confirm_delete_preset
+      case key
+      when "y"
+        delete_preset_at(@preset_index)
+        @confirm_delete_preset = false
+      else
+        @confirm_delete_preset = false
+      end
+      return [self, nil]
+    end
+
+    return close_overlay if key == "esc" || key == "q"
+
+    all = all_presets
+    case key
+    when "up", "k"
+      @preset_index = (@preset_index - 1) % [all.length, 1].max
+    when "down", "j"
+      @preset_index = (@preset_index + 1) % [all.length, 1].max
+    when "enter"
+      load_preset(all[@preset_index]) if all[@preset_index]
+      return close_overlay
+    when "s"
+      @naming_preset = true; @preset_name_buffer = ""
+    when "d"
+      p = all[@preset_index]
+      @confirm_delete_preset = true if p && !p[:builtin]
+    end
+    [self, nil]
+  end
+
+  def all_presets
+    builtin = BUILTIN_PRESETS.map { |n, d| { name: n, data: d, builtin: true } }
+    user = @user_presets.map { |n, d| { name: n, data: d, builtin: false } }
+    builtin + user
+  end
+
+  def load_preset(preset)
+    d = preset[:data]
+    @params[:steps] = d["steps"] if d["steps"]
+    @params[:cfg_scale] = d["cfg_scale"].to_f if d["cfg_scale"]
+    @params[:width] = d["width"] if d["width"]
+    @params[:height] = d["height"] if d["height"]
+    @params[:seed] = d["seed"] if d["seed"]
+    @params[:batch] = d["batch"] if d["batch"]
+    if d["sampler"]
+      @sampler = d["sampler"]
+      @sampler_index = SAMPLER_OPTIONS.index(@sampler) || 1
+    end
+  end
+
+  def save_user_preset(name)
+    @user_presets[name] = {
+      "steps" => @params[:steps], "cfg_scale" => @params[:cfg_scale],
+      "width" => @params[:width], "height" => @params[:height],
+      "seed" => @params[:seed], "sampler" => @sampler, "batch" => @params[:batch],
+    }
+    save_presets
+  end
+
+  def delete_preset_at(idx)
+    all = all_presets
+    p = all[idx]
+    return if !p || p[:builtin]
+    @user_presets.delete(p[:name])
+    save_presets
+    @preset_index = [0, @preset_index - 1].max
+  end
+
+  # ========== File Picker (img2img) ==========
+
+  IMAGE_EXTENSIONS = %w[.png .jpg .jpeg .webp .bmp].freeze
+
+  def open_file_picker
+    case @focus
+    when FOCUS_PROMPT then @prompt_input.blur
+    when FOCUS_NEGATIVE then @negative_input.blur
+    end
+    @overlay = :file_picker
+    @error_message = nil
+    # Start in outputs dir if it exists, otherwise home
+    @file_picker_dir = if @init_image_path
+      File.dirname(@init_image_path)
+    elsif File.directory?(@output_dir)
+      File.expand_path(@output_dir)
+    else
+      File.expand_path("~")
+    end
+    scan_file_picker_dir
+    [self, nil]
+  end
+
+  def paste_image_from_clipboard
+    @status_message = "Reading clipboard..."
+    output_dir = @output_dir
+    FileUtils.mkdir_p(output_dir)
+
+    cmd = Proc.new do
+      timestamp = Time.now.strftime("%Y%m%d_%H%M%S")
+      dest = File.join(output_dir, ".clipboard_#{timestamp}.png")
+
+      if RUBY_PLATFORM.include?("darwin")
+        # macOS: use osascript to extract clipboard image as PNG
+        script = <<~APPLESCRIPT
+          try
+            set imgData to the clipboard as «class PNGf»
+            set filePath to POSIX file "#{dest}"
+            set fileRef to open for access filePath with write permission
+            write imgData to fileRef
+            close access fileRef
+            return "ok"
+          on error errMsg
+            return "error:" & errMsg
+          end try
+        APPLESCRIPT
+        result, status = Open3.capture2("osascript", "-e", script)
+        result = result.strip
+
+        if result == "ok" && File.exist?(dest) && File.size(dest) > 0
+          ClipboardPasteMessage.new(path: dest)
+        else
+          File.delete(dest) if File.exist?(dest)
+          err = result.start_with?("error:") ? result.sub("error:", "") : "No image on clipboard"
+          ClipboardPasteMessage.new(error: err)
+        end
+      else
+        # Linux: try xclip
+        _, status = Open3.capture2("xclip", "-selection", "clipboard", "-t", "image/png", "-o", out: dest)
+        if status.success? && File.exist?(dest) && File.size(dest) > 0
+          ClipboardPasteMessage.new(path: dest)
+        else
+          File.delete(dest) if File.exist?(dest)
+          ClipboardPasteMessage.new(error: "No image on clipboard (need xclip)")
+        end
+      end
+    rescue => e
+      File.delete(dest) rescue nil if dest
+      ClipboardPasteMessage.new(error: e.message)
+    end
+
+    [self, cmd]
+  end
+
+  def scan_file_picker_dir
+    entries = []
+    # Parent directory entry
+    parent = File.dirname(@file_picker_dir)
+    entries << { name: "..", path: parent, type: :dir } unless parent == @file_picker_dir
+
+    begin
+      Dir.entries(@file_picker_dir).sort.each do |name|
+        next if name == "." || name == ".."
+        next if name.start_with?(".")  # skip hidden files
+        full = File.join(@file_picker_dir, name)
+
+        if File.directory?(full)
+          entries << { name: "#{name}/", path: full, type: :dir }
+        elsif IMAGE_EXTENSIONS.include?(File.extname(name).downcase)
+          size = File.size(full) rescue 0
+          entries << { name: name, path: full, type: :file, size: size }
+        end
+      end
+    rescue Errno::EACCES
+      @error_message = "Permission denied: #{@file_picker_dir}"
+    end
+
+    @file_picker_entries = entries
+    @file_picker_index = 0
+    @file_picker_scroll = 0
+  end
+
+  def handle_file_picker_key(message)
+    key = message.to_s
+    return close_overlay if key == "esc" || key == "q"
+    return [self, nil] if @file_picker_entries.empty?
+
+    visible_h = @height - 10
+
+    case key
+    when "up", "k"
+      @file_picker_index = (@file_picker_index - 1) % @file_picker_entries.length
+    when "down", "j"
+      @file_picker_index = (@file_picker_index + 1) % @file_picker_entries.length
+    when "enter"
+      entry = @file_picker_entries[@file_picker_index]
+      if entry[:type] == :dir
+        @file_picker_dir = entry[:path]
+        scan_file_picker_dir
+      else
+        # Select image
+        @init_image_path = entry[:path]
+        @status_message = "Init image: #{File.basename(entry[:path])}"
+        return close_overlay
+      end
+    when "backspace"
+      # Go up one directory
+      parent = File.dirname(@file_picker_dir)
+      unless parent == @file_picker_dir
+        @file_picker_dir = parent
+        scan_file_picker_dir
+      end
+    when "~"
+      @file_picker_dir = File.expand_path("~")
+      scan_file_picker_dir
+    end
+
+    # Keep scroll in view
+    if @file_picker_index < @file_picker_scroll
+      @file_picker_scroll = @file_picker_index
+    elsif @file_picker_index >= @file_picker_scroll + visible_h
+      @file_picker_scroll = @file_picker_index - visible_h + 1
+    end
+
+    [self, nil]
+  end
+
+  def render_file_picker_content
+    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    accent = Lipgloss::Style.new.foreground(Theme::ACCENT)
+    dir_style = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true)
+    file_style = Lipgloss::Style.new.foreground(Theme::TEXT)
+    selected_style = Lipgloss::Style.new.foreground(Theme::ACCENT).bold(true)
+
+    # Current directory header
+    header = dim.render("  ") + accent.render(@file_picker_dir)
+    lines = [header, ""]
+
+    if @file_picker_entries.empty?
+      lines << dim.render("  No image files found")
+      return lines.join("\n")
+    end
+
+    # Show init image status
+    if @init_image_path
+      lines << dim.render("  Current: ") + file_style.render(File.basename(@init_image_path))
+      lines << ""
+    end
+
+    visible_h = @height - 10
+    visible = @file_picker_entries[@file_picker_scroll, visible_h] || []
+
+    visible.each_with_index do |entry, i|
+      actual_i = @file_picker_scroll + i
+      selected = actual_i == @file_picker_index
+      cursor = selected ? selected_style.render("> ") : "  "
+
+      if entry[:type] == :dir
+        name = selected ? selected_style.render(entry[:name]) : dir_style.render(entry[:name])
+        lines << "#{cursor}#{name}"
+      else
+        name_str = selected ? selected_style.render(entry[:name]) : file_style.render(entry[:name])
+        size_str = dim.render("  #{format_bytes(entry[:size] || 0)}")
+        lines << "#{cursor}#{name_str}#{size_str}"
+      end
+    end
+
+    if @file_picker_entries.length > visible_h
+      lines << ""
+      lines << dim.render("  #{@file_picker_index + 1}/#{@file_picker_entries.length}")
+    end
+
+    lines.join("\n")
+  end
+
+  def render_file_picker_status
+    parts = ["enter: select", "backspace: up dir", "~: home"]
+    parts << "esc: cancel"
+    parts.join(" | ")
+  end
+
+  # ========== Image Rendering ==========
+
+  def render_image_halfblocks(path, max_w, max_h, pixelate: nil)
+    return nil unless path && File.exist?(path)
+
+    image = ChunkyPNG::Image.from_file(path)
+    pixel_h = max_h * 2 # each row = 2 vertical pixels
+
+    scale_w = max_w.to_f / image.width
+    scale_h = pixel_h.to_f / image.height
+    scale = [scale_w, scale_h].min
+
+    new_w = (image.width * scale).to_i.clamp(1, max_w)
+    new_h = (image.height * scale).to_i.clamp(1, pixel_h)
+
+    resized = image.resample_nearest_neighbor(new_w, new_h)
+
+    # Pixelation effect: downsample then scale back up for blocky look
+    if pixelate && pixelate > 1
+      tiny_w = [new_w / pixelate, 2].max
+      tiny_h = [new_h / pixelate, 2].max
+      tiny = resized.resample_nearest_neighbor(tiny_w, tiny_h)
+      resized = tiny.resample_nearest_neighbor(new_w, new_h)
+    end
+
+    lines = []
+    y = 0
+    while y < new_h
+      line = +""
+      new_w.times do |x|
+        top = resized[x, y]
+        bottom = (y + 1 < new_h) ? resized[x, y + 1] : ChunkyPNG::Color::BLACK
+
+        tr = ChunkyPNG::Color.r(top)
+        tg = ChunkyPNG::Color.g(top)
+        tb = ChunkyPNG::Color.b(top)
+        br = ChunkyPNG::Color.r(bottom)
+        bg_ = ChunkyPNG::Color.g(bottom)
+        bb = ChunkyPNG::Color.b(bottom)
+
+        line << "\e[38;2;#{tr};#{tg};#{tb}m\e[48;2;#{br};#{bg_};#{bb}m\u2580\e[0m"
+      end
+      lines << line
+      y += 2
+    end
+
+    lines.join("\n")
+  rescue
+    nil
+  end
+
+  # slot: stable ID for this image position (avoids flicker on re-render)
+  def render_image_kitty(path, max_w, max_h, slot: 1)
+    return nil unless path && File.exist?(path) && File.size(path) > 0
+
+    image = ChunkyPNG::Image.from_file(path)
+    png_data = File.binread(path)
+    encoded = Base64.strict_encode64(png_data)
+
+    # Compute cols/rows that fit within max_w × max_h while preserving aspect ratio.
+    # Terminal cells are ~2x taller than wide (e.g. 8px × 16px).
+    cell_ratio = 2.0
+    img_w = image.width.to_f
+    img_h = image.height.to_f
+
+    # Convert image dimensions to "cell units" (cols and rows)
+    # 1 col of image = 1 cell width, 1 row of image = cell_ratio cell widths of height
+    img_cols = img_w
+    img_rows = img_h / cell_ratio  # in cell-equivalent units
+
+    scale_c = max_w / img_cols
+    scale_r = max_h / img_rows
+    scale = [scale_c, scale_r].min
+
+    fit_cols = (img_cols * scale).floor.clamp(1, max_w)
+    fit_rows = (img_rows * scale).floor.clamp(1, max_h)
+
+    # Delete previous image in this slot, then transmit+display
+    result = +"\e_Ga=d,d=I,i=#{slot},q=2\e\\"
+
+    # Pass both c and r to hard-cap within bounds. The terminal fits the image
+    # within this cell rectangle, preserving aspect ratio internally.
+    # f=100=PNG, a=T=transmit+display, q=2=suppress responses
+    chunks = encoded.scan(/.{1,4096}/)
+    chunks.each_with_index do |chunk, i|
+      more = (i < chunks.length - 1) ? 1 : 0
+      if i == 0
+        result << "\e_Gf=100,a=T,c=#{fit_cols},r=#{fit_rows},i=#{slot},q=2,m=#{more};#{chunk}\e\\"
+      else
+        result << "\e_Gm=#{more};#{chunk}\e\\"
+      end
+    end
+
+    # Reserve rows so bubbletea accounts for image height
+    result << ("\n" * [fit_rows - 1, 0].max)
+    result
+  rescue
+    nil
+  end
+
+  def clear_kitty_images
+    # Delete all kitty images - used when switching views
+    print "\e_Ga=d,d=A,q=2\e\\"
+  end
+
+  # Route to halfblocks for lipgloss-compatible rendering
+  # Kitty graphics are used only in fullscreen mode (render_fullscreen_image)
+  # because lipgloss miscounts kitty escape sequences as visible characters
+  def render_image(path, max_w, max_h, pixelate: nil)
+    render_image_halfblocks(path, max_w, max_h, pixelate: pixelate)
+  end
+
+  # ========== Rendering: Main View ==========
+
+  def render_main_view
+    header = render_header
+    left = render_left_panel
+    right = render_right_panel
+    status = render_status_bar
+    help = render_help_bar
+    body = Lipgloss.join_horizontal(:top, left, right)
+    Lipgloss.join_vertical(:left, header, body, status, help)
+  end
+
+  def render_header
+    logo = Theme.gradient_text(" chewy ", Theme::PRIMARY, Theme::ACCENT)
+    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+
+    model_info = if @selected_model_path
+      name = File.basename(@selected_model_path, File.extname(@selected_model_path))
+      is_flux = flux_model?(@selected_model_path)
+      type_badge = if is_flux
+        ok = flux_companions_present?
+        s = Lipgloss::Style.new.foreground(ok ? Theme::SUCCESS : Theme::WARNING).bold(true)
+        " #{s.render(ok ? 'FLUX' : 'FLUX!')}"
+      else
+        " #{dim.render('SD')}"
+      end
+      " #{dim.render('|')} #{Lipgloss::Style.new.foreground(Theme::TEXT).render(name)}#{type_badge}"
+    else
+      " #{dim.render('| no model selected')}"
+    end
+
+    img2img_badge = if @init_image_path
+      name = File.basename(@init_image_path)
+      # Truncate filename if too long
+      name = name[0, 20] + "..." if name.length > 23
+      i2i = Lipgloss::Style.new.foreground(Theme::ACCENT).bold(true)
+      " #{dim.render('|')} #{i2i.render('img2img')} #{dim.render(name)}"
+    else
+      ""
+    end
+
+    model_hint = dim.render("  [^n] models")
+
+    Lipgloss::Style.new.width(@width).bold(true).render("#{logo}#{model_info}#{model_hint}#{img2img_badge}")
+  end
+
+  def left_panel_heights
+    body_h = @height - 4
+
+    # Params needs: label + separator + N params + 2 border lines
+    params_min = @param_display_keys.length + 4
+    params_h = [params_min, (body_h * 0.30).to_i].max
+
+    remaining = [body_h - params_h, 8].max
+    prompt_h = [(remaining * 0.5).to_i, 5].max
+    negative_h = [remaining - prompt_h, 5].max
+
+    # Rebalance if we overshot
+    total = prompt_h + negative_h + params_h
+    if total > body_h
+      params_h = body_h - prompt_h - negative_h
+    end
+
+    [prompt_h, negative_h, params_h]
+  end
+
+  def render_left_panel
+    lw = left_panel_width
+    prompt_h, negative_h, params_h = left_panel_heights
+
+    prompt_section = render_prompt_section(lw, prompt_h)
+    negative_section = render_negative_section(lw, negative_h)
+    params_section = render_params_section(lw, params_h)
+
+    Lipgloss.join_vertical(:left, prompt_section, negative_section, params_section)
+  end
+
+  def render_right_panel
+    rw = right_panel_width
+    body_h = @height - 4
+
+    prompt_h, negative_h, params_h = left_panel_heights
+    total_left = prompt_h + negative_h + params_h
+
+    border_color = Theme::BORDER_DIM
+
+    content = if @generating
+      render_generating_preview(rw - 4, total_left - 2)
+    elsif @last_output_path && File.exist?(@last_output_path)
+      render_image_preview(rw - 4, total_left - 2)
+    else
+      render_empty_preview(rw - 4, total_left - 2)
+    end
+
+    Lipgloss::Style.new
+      .border(:rounded).border_foreground(border_color)
+      .width(rw - 4).height(total_left - 2).render(content)
+  end
+
+  def render_image_preview(max_w, max_h)
+    # Use cache if path hasn't changed and no reveal animation
+    if @preview_cache && @preview_path == @last_output_path && @reveal_phase.nil?
+      return @preview_cache
+    end
+
+    # Progressive reveal: phase 0=very blocky, 4=full res
+    pixelate = if @reveal_phase
+                 [16, 8, 4, 2, nil][@reveal_phase]
+               end
+
+    img_str = render_image(@last_output_path, max_w, max_h - 2, pixelate: pixelate)
+    if img_str
+      dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+      info = "#{File.basename(@last_output_path)}  #{dim.render("| ^e to open | #{@last_generation_time}s")}"
+      seed_info = @last_seed ? "  #{dim.render("| seed #{@last_seed}")}" : ""
+      result = "#{img_str}\n#{info}#{seed_info}"
+      # Only cache at full resolution
+      if @reveal_phase.nil?
+        @preview_cache = result
+        @preview_path = @last_output_path
+      end
+      result
+    else
+      render_empty_preview(max_w, max_h)
+    end
+  end
+
+  def render_generating_preview(max_w, max_h)
+    accent = Lipgloss::Style.new.foreground(Theme::ACCENT).bold(true)
+    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+
+    @gen_start_time ||= Time.now
+    elapsed = (Time.now - @gen_start_time).to_i
+    elapsed_str = elapsed >= 60 ? "#{elapsed / 60}m#{elapsed % 60}s" : "#{elapsed}s"
+
+    # Build status lines
+    status_lines = []
+    status_lines << "#{@spinner.view} #{accent.render("Generating...")}  #{dim.render(elapsed_str)}"
+
+    if @gen_total_steps > 0 && @gen_step > 0
+      pct = @gen_step.to_f / @gen_total_steps
+      bar = @progress.view_as(pct)
+      remaining = @gen_total_steps - @gen_step
+      eta_str = if @gen_sampling_start && @gen_step > 0
+        secs_per_step = (Time.now - @gen_sampling_start) / @gen_step
+        eta_secs = (remaining * secs_per_step).to_i
+        eta_secs >= 60 ? "~#{eta_secs / 60}m#{eta_secs % 60}s left" : "~#{eta_secs}s left"
+      else
+        ""
+      end
+      status_lines << "#{bar} #{dim.render("#{@gen_step}/#{@gen_total_steps}")}  #{dim.render(eta_str)}"
+    else
+      status_lines << dim.render(@gen_status || "Starting...")
+    end
+
+    if @gen_total_batch > 1
+      status_lines << dim.render("Batch #{@gen_current_batch}/#{@gen_total_batch}")
+    end
+    status_lines << dim.render("^x to cancel")
+
+    # Try to show live preview image
+    preview_img = load_gen_preview(max_w, max_h - status_lines.length - 1)
+
+    if preview_img
+      # Image on top, status below
+      (preview_img + "\n" + status_lines.join("\n"))
+    else
+      # No preview yet — center status vertically
+      lines = [""] + status_lines
+      pad_top = [(max_h - lines.length) / 2, 0].max
+      (Array.new(pad_top, "") + lines).join("\n")
+    end
+  end
+
+  def load_gen_preview(max_w, max_h)
+    return nil unless @gen_preview_path && File.exist?(@gen_preview_path)
+
+    begin
+      mtime = File.mtime(@gen_preview_path)
+      size = File.size(@gen_preview_path)
+      return nil if size == 0
+
+      # Use cache if file hasn't changed
+      if @gen_preview_cache && @gen_preview_mtime == mtime
+        return @gen_preview_cache
+      end
+
+      img_str = render_image(@gen_preview_path, max_w, max_h)
+      if img_str
+        @gen_preview_cache = img_str
+        @gen_preview_mtime = mtime
+      end
+      img_str
+    rescue
+      nil
+    end
+  end
+
+  def render_empty_preview(max_w, max_h)
+    dim = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED)
+    lines = [
+      dim.render("No image yet"),
+      "",
+      dim.render("Press enter to generate"),
+    ]
+    pad_top = [(max_h - lines.length) / 2, 0].max
+    (Array.new(pad_top, "") + lines).join("\n")
+  end
+
+  def render_prompt_section(tw, box_h)
+    focused = @focus == FOCUS_PROMPT
+    border_color = focused ? Theme::BORDER_FOCUS : Theme::BORDER_DIM
+
+    label_style = Lipgloss::Style.new.foreground(focused ? Theme::PRIMARY : Theme::TEXT_DIM).bold(focused)
+    label = label_style.render("Prompt")
+
+    lora_tags = if @selected_loras.any?
+      tag_style = Lipgloss::Style.new.foreground(Theme::ACCENT).bold(true)
+      dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+      tags = @selected_loras.map { |l| tag_style.render("[#{l[:name]}:#{l[:weight]}]") }
+      "\n#{dim.render("LoRA:")} #{tags.join(' ')}"
+    else
+      ""
+    end
+
+    content = "#{label}\n#{@prompt_input.view}#{lora_tags}"
+
+    Lipgloss::Style.new
+      .border(:rounded).border_foreground(border_color)
+      .width(tw - 2).height(box_h - 2).render(content)
+  end
+
+  def render_negative_section(tw, box_h)
+    focused = @focus == FOCUS_NEGATIVE
+    border_color = focused ? Theme::BORDER_FOCUS : Theme::BORDER_DIM
+
+    label_style = Lipgloss::Style.new.foreground(focused ? Theme::ACCENT : Theme::TEXT_DIM).bold(focused)
+    label = label_style.render("Negative Prompt")
+
+    content = "#{label}\n#{@negative_input.view}"
+
+    Lipgloss::Style.new
+      .border(:rounded).border_foreground(border_color)
+      .width(tw - 2).height(box_h - 2).render(content)
+  end
+
+  def render_params_section(tw, box_h)
+    focused = @focus == FOCUS_PARAMS
+    border_color = focused ? Theme::BORDER_FOCUS : Theme::BORDER_DIM
+
+    label_style = Lipgloss::Style.new.foreground(focused ? Theme::PRIMARY : Theme::TEXT_DIM).bold(focused)
+    label = label_style.render("Parameters")
+
+    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    separator = dim.render("─" * [tw - 6, 4].max)
+
+    param_lines = @param_display_keys.each_with_index.map do |key, i|
+      label_text = param_label(key)
+      value = param_value(key)
+      selected = i == @param_index
+
+      display = if @editing_param && selected
+        Lipgloss::Style.new.foreground(Theme::ACCENT).render(@param_edit_buffer) +
+          Lipgloss::Style.new.foreground(Theme::ACCENT).blink(true).render("_")
+      elsif key == :sampler
+        arrow = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+        "#{arrow.render("<")} #{value} #{arrow.render(">")}"
+      elsif key == :seed && value == -1
+        Lipgloss::Style.new.foreground(Theme::TEXT_DIM).italic(true).render("random")
+      elsif key == :strength
+        hint = @init_image_path ? "" : Lipgloss::Style.new.foreground(Theme::TEXT_MUTED).render(" (^b to set image)")
+        "#{value}#{hint}"
+      else
+        value.to_s
+      end
+
+      if selected && focused
+        cursor = Lipgloss::Style.new.foreground(Theme::ACCENT).bold(true).render("> ")
+        lbl = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true).render(label_text)
+        "#{cursor}#{lbl}  #{display}"
+      else
+        "  #{dim.render(label_text)}  #{display}"
+      end
+    end
+
+    content = "#{label}\n#{separator}\n#{param_lines.join("\n")}"
+    Lipgloss::Style.new
+      .border(:rounded).border_foreground(border_color)
+      .width(tw - 2).height(box_h - 2).padding(0, 1).render(content)
+  end
+
+  def param_label(key)
+    case key
+    when :steps then "Steps    "
+    when :cfg_scale then "CFG Scale"
+    when :width then "Width    "
+    when :height then "Height   "
+    when :seed then "Seed     "
+    when :sampler then "Sampler  "
+    when :batch then "Batch    "
+    when :strength then "Strength "
+    else key.to_s.ljust(9)
+    end
+  end
+
+  def render_status_bar
+    if @error_message
+      error_bar = Lipgloss::Style.new.background(Theme::ERROR).foreground(Theme::TEXT).width(@width).padding(0, 1)
+      return error_bar.render("! #{@error_message}")
+    end
+
+    if @companion_downloading
+      bar = Lipgloss::Style.new.background(Theme::SECONDARY).foreground(Theme::TEXT).width(@width).padding(0, 1)
+      return bar.render("#{@spinner.view} Downloading FLUX companion files (#{@companion_remaining} remaining)...")
+    end
+
+    if @status_message
+      bar = Lipgloss::Style.new.background(Theme::PRIMARY).foreground(Theme::TEXT).width(@width).padding(0, 1)
+      return bar.render(@status_message)
+    end
+
+    ""
+  end
+
+  def render_help_bar
+    keys = context_keys
+    key_style = Lipgloss::Style.new.foreground(Theme::TEXT_DIM).bold(true)
+    desc_style = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED)
+    sep = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED).render(" | ")
+
+    items = keys.map { |k, d| "#{key_style.render(k)} #{desc_style.render(d)}" }
+    Lipgloss::Style.new.width(@width).padding(0, 1).render(items.join(sep))
+  end
+
+  def context_keys
+    base = [["tab", "focus"], ["^n", "models"], ["^q", "quit"]]
+
+    case @focus
+    when FOCUS_PROMPT
+      base + [["enter", "generate"], ["up/dn", "history"]]
+    when FOCUS_NEGATIVE
+      base + [["enter", "generate"]]
+    when FOCUS_PARAMS
+      base + [["enter", "edit"], ["j/k", "nav"]]
+    else
+      base
+    end + [["^b", "img2img"], ["^v", "paste img"], ["^d", "download"], ["^a", "gallery"], ["^g", "history"], ["^l", "lora"], ["^p", "preset"]] +
+    (@init_image_path ? [["^u", "clear img"]] : []) +
+    (@last_output_path ? [["^e", "open"], ["^f", "fullscreen"]] : []) +
+    (@generating ? [["^x", "cancel"]] : [])
+  end
+
+  # ========== Rendering: Models Overlay ==========
+
+  def render_models_content
+    return "No models found — press d to download" if @model_paths.empty?
+    return "Loading..." unless @model_list
+
+    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    accent = Lipgloss::Style.new.foreground(Theme::ACCENT)
+
+    list_view = @model_list.view
+
+    # Show metadata for highlighted model
+    idx = @model_list.selected_index rescue 0
+    meta = ""
+    if @model_paths.any? && idx < @model_paths.length
+      path = @model_paths[idx]
+      if File.exist?(path)
+        stat = File.stat(path)
+        ext = File.extname(path).delete(".").upcase
+        is_flux = flux_model?(path)
+
+        type_tag = if is_flux
+          ok = flux_companions_present?
+          s = Lipgloss::Style.new.foreground(ok ? Theme::SUCCESS : Theme::WARNING).bold(true)
+          s.render(ok ? "FLUX" : "FLUX (needs companions)")
+        else
+          dim.render("SD")
+        end
+
+        pin = @pinned_models.include?(path) ? accent.render(" [pinned]") : ""
+        meta = "\n#{accent.render(format_bytes(stat.size))} #{dim.render("|")} #{dim.render(ext)} #{dim.render("|")} #{type_tag}#{pin}"
+        meta += "\n#{dim.render(path)}"
+      end
+    end
+
+    "#{list_view}#{meta}"
+  end
+
+  def render_models_status
+    "enter: select | f: pin | d: download | del: delete | esc: close"
+  end
+
+  # ========== Rendering: Overlay Panels ==========
+
+  def render_overlay_panel(title, content, status_text)
+    # Title bar
+    title_style = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true)
+    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    title_bar = "#{title_style.render(title)}"
+    separator = dim.render("─" * (@width - 6))
+
+    body_content = "#{title_bar}\n#{separator}\n#{content}"
+    body = Lipgloss::Style.new
+      .border(:rounded).border_foreground(Theme::PRIMARY)
+      .width(@width - 4).height(@height - 4).padding(0, 1).render(body_content)
+
+    # Status uses help bar style
+    key_style = Lipgloss::Style.new.foreground(Theme::TEXT_DIM).bold(true)
+    desc_style = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED)
+    status = Lipgloss::Style.new.width(@width).padding(0, 1)
+      .render(format_help_text(status_text, key_style, desc_style))
+
+    Lipgloss.join_vertical(:left, body, status)
+  end
+
+  def format_help_text(text, key_style, desc_style)
+    # Parse "key: action | key: action" format into styled text
+    parts = text.split(" | ")
+    sep = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED).render(" | ")
+    parts.map do |part|
+      if part.include?(": ")
+        k, d = part.split(": ", 2)
+        "#{key_style.render(k)} #{desc_style.render(d)}"
+      else
+        desc_style.render(part)
+      end
+    end.join(sep)
+  end
+
+  def render_download_view
+    content = if @fetching
+      "#{@spinner.view} Searching HuggingFace..."
+    elsif @download_view == :repos && @repo_list
+      @repo_list.view
+    elsif @download_view == :files && @file_list
+      @file_list.view
+    else
+      "Loading..."
+    end
+
+    title = @download_view == :files ? "Files in #{@selected_repo_id}" : "Download Models"
+    title_style = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true)
+    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    separator = dim.render("─" * (@width - 6))
+
+    # Search bar (only on repos view)
+    search_bar = if @download_view == :repos
+      border_color = @download_search_focused ? Theme::BORDER_FOCUS : Theme::BORDER_DIM
+      search_label = Lipgloss::Style.new.foreground(Theme::TEXT_DIM).render("Search: ")
+      Lipgloss::Style.new.border(:rounded).border_foreground(border_color)
+        .width(@width - 8).render("#{search_label}#{@download_search_input.view}")
+    end
+
+    parts = [title_style.render(title), separator]
+    parts << search_bar if search_bar
+    parts << content
+    body_content = parts.join("\n")
+
+    body = Lipgloss::Style.new
+      .border(:rounded).border_foreground(Theme::PRIMARY)
+      .width(@width - 4).height(@height - 4).padding(0, 1).render(body_content)
+    status = render_download_status_bar
+    Lipgloss.join_vertical(:left, body, status)
+  end
+
+  def render_download_status_bar
+    if @model_downloading
+      current = (File.size(@download_dest) rescue 0)
+      pct = @download_total > 0 ? (current.to_f / @download_total) : 0
+      bar = @progress.view_as(pct.clamp(0.0, 1.0))
+      size_text = @download_total > 0 ?
+        "#{format_bytes(current)} / #{format_bytes(@download_total)}" :
+        format_bytes(current)
+
+      download_bar = Lipgloss::Style.new.background(Theme::SECONDARY).foreground(Theme::TEXT).width(@width).padding(0, 1)
+      return download_bar.render("#{@spinner.view} #{@download_filename} #{bar} #{size_text}")
+    end
+
+    if @error_message
+      error_bar = Lipgloss::Style.new.background(Theme::ERROR).foreground(Theme::TEXT).width(@width).padding(0, 1)
+      return error_bar.render("! #{@error_message}")
+    end
+
+    status_text = if @status_message
+      @status_message
+    elsif @download_view == :files
+      "enter: download | esc: back"
+    elsif @download_search_focused
+      "enter: search | esc: unfocus | tab: toggle"
+    else
+      "tab: search | enter: browse | esc: close"
+    end
+
+    key_style = Lipgloss::Style.new.foreground(Theme::TEXT_DIM).bold(true)
+    desc_style = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED)
+    Lipgloss::Style.new.width(@width).padding(0, 1)
+      .render(format_help_text(status_text, key_style, desc_style))
+  end
+
+  def render_history_content
+    @history_list ? @history_list.view : "No history"
+  end
+
+  def render_history_status
+    "enter: load params | esc: close"
+  end
+
+  def render_fullscreen_image
+    return render_empty_preview(@width, @height) unless @fullscreen_image_path
+
+    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    hint = dim.render("press any key to go back")
+
+    img_h = @height - 2
+    img_w = @width
+
+    if @kitty_graphics
+      # Kitty mode: raw escape sequence, no lipgloss wrapping
+      img = render_image_kitty(@fullscreen_image_path, img_w, img_h, slot: 10)
+      if img
+        "#{img}\n#{hint}"
+      else
+        # Fallback to halfblocks
+        img = render_image_halfblocks(@fullscreen_image_path, img_w, img_h)
+        "#{img || "(failed to load)"}\n#{hint}"
+      end
+    else
+      # Halfblock mode
+      img = render_image_halfblocks(@fullscreen_image_path, img_w, img_h)
+      "#{img || "(failed to load)"}\n#{hint}"
+    end
+  end
+
+  def render_gallery_view
+    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    title_style = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true)
+    sel_style = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true)
+    meta_key = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    meta_val = Lipgloss::Style.new.foreground(Theme::TEXT)
+
+    if @gallery_images.empty?
+      content = dim.render("No images found in #{@output_dir}")
+      return render_overlay_panel("Gallery", content, "esc: close")
+    end
+
+    inner_h = @height - 6
+    list_w = [(@width * 0.35).to_i, 30].max
+    preview_w = @width - list_w - 8
+
+    # -- Left: image list --
+    visible = inner_h - 2
+    half = visible / 2
+    scroll_offset = if @gallery_index < half
+                      0
+                    elsif @gallery_index >= @gallery_images.length - half
+                      [@gallery_images.length - visible, 0].max
+                    else
+                      @gallery_index - half
+                    end
+
+    list_lines = @gallery_images.each_with_index.map do |img, i|
+      next nil if i < scroll_offset || i >= scroll_offset + visible
+
+      fname = File.basename(img[:path], ".png")
+      prompt = (img[:meta]["prompt"] || "")[0, list_w - 6]
+      label = prompt.empty? ? fname : prompt
+      if i == @gallery_index
+        sel_style.render("> #{label}")
+      else
+        "  #{dim.render(label)}"
+      end
+    end.compact
+
+    counter = dim.render("#{@gallery_index + 1}/#{@gallery_images.length}")
+    list_content = list_lines.join("\n") + "\n" + counter
+    list_panel = Lipgloss::Style.new
+      .border(:rounded).border_foreground(Theme::PRIMARY)
+      .width(list_w).height(inner_h).padding(0, 1)
+      .render(list_content)
+
+    # -- Right: preview + metadata --
+    entry = @gallery_images[@gallery_index]
+    meta = entry[:meta]
+
+    info_lines = []
+    info_lines << "#{meta_key.render("File:")} #{meta_val.render(File.basename(entry[:path]))}"
+    info_lines << "#{meta_key.render("Prompt:")} #{meta_val.render((meta["prompt"] || "-")[0, preview_w - 12])}" if meta["prompt"]
+    info_lines << "#{meta_key.render("Model:")} #{meta_val.render(File.basename(meta["model"] || "-"))}" if meta["model"]
+    if meta["steps"] || meta["seed"]
+      parts = []
+      parts << "steps:#{meta["steps"]}" if meta["steps"]
+      parts << "cfg:#{meta["cfg_scale"]}" if meta["cfg_scale"]
+      parts << "#{meta["width"]}x#{meta["height"]}" if meta["width"]
+      parts << "seed:#{meta["seed"]}" if meta["seed"]
+      info_lines << meta_key.render(parts.join(" | "))
+    end
+    if meta["generation_time_seconds"]
+      info_lines << "#{meta_key.render("Time:")} #{meta_val.render("#{meta["generation_time_seconds"]}s")}"
+    end
+
+    info_h = info_lines.length + 1
+    thumb_h = [inner_h - info_h - 2, 6].max
+
+    thumb = gallery_thumb(entry[:path], preview_w - 4, thumb_h)
+    thumb ||= dim.render("(no preview)")
+    preview_content = thumb + "\n" + info_lines.join("\n")
+    preview_panel = Lipgloss::Style.new
+      .border(:rounded).border_foreground(Theme::BORDER_DIM)
+      .width(preview_w).height(inner_h).padding(0, 1)
+      .render(preview_content)
+
+    body = Lipgloss.join_horizontal(:top, list_panel, preview_panel)
+
+    title_bar = title_style.render("Gallery") + "  " + dim.render("#{@gallery_images.length} images")
+    outer = Lipgloss::Style.new.padding(0, 1).render(
+      Lipgloss.join_vertical(:left, title_bar, body)
+    )
+
+    status_text = "enter: fullscreen | ^e: open external | del: delete | j/k: navigate | esc: close"
+    key_style = Lipgloss::Style.new.foreground(Theme::TEXT_DIM).bold(true)
+    desc_style = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED)
+    status = Lipgloss::Style.new.width(@width).padding(0, 1)
+      .render(format_help_text(status_text, key_style, desc_style))
+
+    Lipgloss.join_vertical(:left, outer, status)
+  end
+
+  def gallery_thumb(path, max_w, max_h)
+    cached = @gallery_thumb_cache[path]
+    return cached if cached
+
+    # Limit cache to 20 entries to avoid excessive memory use
+    @gallery_thumb_cache.shift if @gallery_thumb_cache.size >= 20
+
+    thumb = render_image(path, max_w, max_h)
+    @gallery_thumb_cache[path] = thumb if thumb
+    thumb
+  end
+
+  def render_lora_content
+    if @available_loras.empty?
+      dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+      return dim.render("No LoRAs found in #{@lora_dir}")
+    end
+
+    lines = @available_loras.each_with_index.map do |lora, i|
+      sel = @selected_loras.find { |l| l[:path] == lora[:path] }
+      selected = i == @lora_index
+
+      check = if sel
+        Lipgloss::Style.new.foreground(Theme::SUCCESS).render("[x]")
+      else
+        Lipgloss::Style.new.foreground(Theme::TEXT_DIM).render("[ ]")
+      end
+
+      weight = if @editing_lora_weight && selected
+        Lipgloss::Style.new.foreground(Theme::ACCENT).render(" w:#{@lora_weight_buffer}_")
+      elsif sel
+        Lipgloss::Style.new.foreground(Theme::ACCENT).render(" w:#{sel[:weight]}")
+      else
+        ""
+      end
+
+      if selected
+        cursor = Lipgloss::Style.new.foreground(Theme::ACCENT).bold(true).render("> ")
+        name = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true).render(lora[:name])
+        "#{cursor}#{check} #{name}#{weight}"
+      else
+        "  #{check} #{lora[:name]}#{weight}"
+      end
+    end
+    lines.join("\n")
+  end
+
+  def render_lora_status
+    if @editing_lora_weight
+      "enter: confirm | esc: cancel"
+    else
+      "space: toggle | +/-: weight | w: edit | esc: close"
+    end
+  end
+
+  def render_preset_content
+    all = all_presets
+    if all.empty?
+      return Lipgloss::Style.new.foreground(Theme::TEXT_DIM).render("No presets")
+    end
+
+    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+
+    lines = all.each_with_index.map do |p, i|
+      selected = i == @preset_index
+      d = p[:data]
+      tag = p[:builtin] ?
+        Lipgloss::Style.new.foreground(Theme::TEXT_MUTED).render(" built-in") :
+        Lipgloss::Style.new.foreground(Theme::SUCCESS).render(" custom")
+
+      desc_parts = [
+        "#{d['steps']}steps",
+        d['sampler'],
+        "#{d['width']}x#{d['height']}",
+      ]
+      desc = dim.render(desc_parts.join(" / "))
+
+      if selected
+        cursor = Lipgloss::Style.new.foreground(Theme::ACCENT).bold(true).render("> ")
+        name = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true).render(p[:name])
+        "#{cursor}#{name}#{tag}\n    #{desc}"
+      else
+        "  #{p[:name]}#{tag}\n    #{desc}"
+      end
+    end
+
+    result = lines.join("\n")
+    if @naming_preset
+      prompt_style = Lipgloss::Style.new.foreground(Theme::ACCENT)
+      result += "\n\n#{prompt_style.render("Name:")} #{@preset_name_buffer}_"
+    elsif @confirm_delete_preset
+      warn_style = Lipgloss::Style.new.foreground(Theme::ERROR).bold(true)
+      result += "\n\n#{warn_style.render("Delete this preset?")} #{dim.render("y/n")}"
+    end
+    result
+  end
+
+  def render_preset_status
+    if @naming_preset
+      "enter: save | esc: cancel"
+    elsif @confirm_delete_preset
+      "y: confirm | any: cancel"
+    else
+      "enter: load | s: save | d: delete | esc: close"
+    end
+  end
+
+  # ========== HF Token Overlay ==========
+
+  def handle_hf_token_key(message)
+    key = message.to_s
+    case key
+    when "esc"
+      @hf_token_pending_action = nil
+      @hf_token_input.value = ""
+      return close_overlay
+    when "enter"
+      token = @hf_token_input.value.strip
+      if token.empty?
+        @error_message = "Token cannot be empty"
+        return [self, nil]
+      end
+      save_hf_token(token)
+      @hf_token_input.value = ""
+      pending = @hf_token_pending_action
+      @hf_token_pending_action = nil
+      @overlay = nil
+      @status_message = "Token saved"
+      case @focus
+      when FOCUS_PROMPT then @prompt_input.focus
+      when FOCUS_NEGATIVE then @negative_input.focus
+      end
+      # Resume the action that triggered the token prompt
+      return download_flux_companions if pending == :flux_companions
+      return [self, nil]
+    end
+    @hf_token_input, cmd = @hf_token_input.update(message)
+    [self, cmd]
+  end
+
+  def render_hf_token_content
+    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    accent = Lipgloss::Style.new.foreground(Theme::ACCENT)
+
+    lines = []
+    lines << dim.render("FLUX models require a HuggingFace token to download companion files.")
+    lines << ""
+    lines << dim.render("1. Go to  ") + accent.render("huggingface.co/settings/tokens")
+    lines << dim.render("2. Create a token (read access is enough)")
+    lines << dim.render("3. Accept FLUX model terms at")
+    lines << "   " + accent.render("huggingface.co/black-forest-labs/FLUX.1-schnell")
+    lines << dim.render("4. Paste your token below")
+    lines << ""
+    lines << "Token: #{@hf_token_input.view}"
+    lines << ""
+    lines << dim.render("Saved to ~/.cache/huggingface/token")
+    lines.join("\n")
+  end
+
+  def render_hf_token_status
+    "enter: save | esc: cancel"
+  end
+
+  # ========== HTTP Helpers ==========
+
+  def hf_get(uri, limit = 5)
+    raise "Too many redirects" if limit == 0
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = (uri.scheme == "https")
+    http.read_timeout = 30; http.open_timeout = 10
+    req = Net::HTTP::Get.new(uri)
+    req["Accept"] = "application/json"; req["User-Agent"] = "chewy-tui/1.0"
+    resp = http.request(req)
+    case resp
+    when Net::HTTPRedirection then hf_get(URI.parse(resp["location"]), limit - 1)
+    when Net::HTTPSuccess then resp
+    else raise "HTTP #{resp.code}: #{resp.message}"
+    end
+  end
+
+  # ========== Formatting ==========
+
+  def format_bytes(bytes)
+    if bytes >= 1_073_741_824 then "%.1f GB" % (bytes.to_f / 1_073_741_824)
+    elsif bytes >= 1_048_576 then "%.1f MB" % (bytes.to_f / 1_048_576)
+    elsif bytes >= 1024 then "%.1f KB" % (bytes.to_f / 1024)
+    else "#{bytes} B"
+    end
+  end
+
+  def format_number(n)
+    n.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse
+  end
+end
+
+# ---------- Entrypoint ----------
+
+Bubbletea.run(Chewy.new, alt_screen: true)

@@ -1,0 +1,6 @@
+outputs/
+.DS_Store
+*.part
+bin/sd
+.bundle/
+vendor/
