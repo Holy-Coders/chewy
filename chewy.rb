@@ -752,33 +752,17 @@ class FireworksProvider < Provider::Base
     { id: "accounts/fireworks/models/playground-v2-5-1024px-aesthetic", name: "Playground v2.5", desc: "Aesthetic, 1024px", type: :sdxl },
   ].freeze
 
-  BASE_URL = "https://api.fireworks.ai/inference/v1/image_generation".freeze
-
   def id; "fireworks"; end
   def display_name; "Fireworks"; end
   def provider_type; :api; end
 
   def capabilities
     Provider::Capabilities.new(
-      negative_prompt: true, seed: true, batch: true, img2img: false,
+      negative_prompt: false, seed: false, batch: true, img2img: false,
       live_preview: false, cancel: false, model_listing: true, lora: false,
-      cfg_scale: true, sampler: false, scheduler: false, threads: false,
+      cfg_scale: false, sampler: false, scheduler: false, threads: false,
       strength: false, width_height: true
     )
-  end
-
-  def capabilities_for_model(model_id)
-    model_info = MODELS.find { |m| m[:id] == model_id }
-    if model_info&.dig(:type) == :flux
-      Provider::Capabilities.new(
-        negative_prompt: false, seed: true, batch: true, img2img: false,
-        live_preview: false, cancel: false, model_listing: true, lora: false,
-        cfg_scale: false, sampler: false, scheduler: false, threads: false,
-        strength: false, width_height: true
-      )
-    else
-      capabilities
-    end
   end
 
   def needs_api_key?; true; end
@@ -794,35 +778,22 @@ class FireworksProvider < Provider::Base
 
     model_id = request.model || MODELS.first[:id]
     model_info = MODELS.find { |m| m[:id] == model_id }
-    is_flux = model_info&.dig(:type) == :flux
 
     on_event&.call(:status, "Sending request to Fireworks...")
 
-    # Round dimensions to multiples of 8
     w = (request.width / 8.0).round * 8
     h = (request.height / 8.0).round * 8
     n = [request.batch || 1, 1].max
 
     body = {
+      model: model_id,
       prompt: request.prompt,
-      width: w, height: h,
-      samples: n,
-      seed: request.seed && request.seed >= 0 ? request.seed : 0,
-      safety_check: false,
-      output_format: "png",
+      n: n,
+      size: "#{w}x#{h}",
+      response_format: "b64_json",
     }
 
-    if is_flux
-      body[:guidance_scale] = 3.5
-      body[:steps] = [request.steps || 4, 1].max
-    else
-      body[:cfg_scale] = request.cfg_scale || 7.0
-      body[:steps] = [request.steps || 20, 1].max
-      neg = request.negative_prompt.to_s.strip
-      body[:negative_prompt] = neg unless neg.empty?
-    end
-
-    uri = URI.parse("#{BASE_URL}/#{model_id}")
+    uri = URI.parse("https://api.fireworks.ai/inference/v1/images/generations")
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
     http.open_timeout = 30
@@ -831,7 +802,6 @@ class FireworksProvider < Provider::Base
     req = Net::HTTP::Post.new(uri)
     req["Authorization"] = "Bearer #{api_key}"
     req["Content-Type"] = "application/json"
-    req["Accept"] = n > 1 ? "application/json" : "image/png"
     req.body = JSON.generate(body)
 
     model_name = model_info&.dig(:name) || model_id.split("/").last
@@ -841,45 +811,40 @@ class FireworksProvider < Provider::Base
     resp = http.request(req)
     elapsed = (Time.now - start_time).round(1)
 
-    # Fireworks can return image binary directly or JSON with b64
     unless resp.is_a?(Net::HTTPSuccess)
       error_body = JSON.parse(resp.body) rescue {}
-      error_msg = error_body["error"] || error_body.dig("error", "message") || "HTTP #{resp.code}: #{resp.message}"
+      error_msg = error_body.dig("error", "message") || error_body["message"] || "HTTP #{resp.code}: #{resp.message}"
       return Provider::GenerationResult.new(error: "Fireworks: #{error_msg}")
     end
+
+    data = JSON.parse(resp.body)
+    images = data["data"] || []
+    return Provider::GenerationResult.new(error: "No images returned") if images.empty?
 
     on_event&.call(:status, "Saving images...")
     FileUtils.mkdir_p(request.output_dir)
 
-    content_type = resp["content-type"].to_s
-
     paths = []
-    if content_type.include?("image/")
-      # Binary image response
+    images.each_with_index do |img, i|
       timestamp = Time.now.strftime("%Y%m%d_%H%M%S_%L")
-      output_path = File.join(request.output_dir, "#{timestamp}_0.png")
-      File.binwrite(output_path, resp.body)
-      paths << output_path
-    else
-      # JSON response with b64_json data array
-      data = JSON.parse(resp.body)
-      images = data["data"] || (data["b64_json"] ? [data] : [])
-
-      images.each_with_index do |img, i|
-        timestamp = Time.now.strftime("%Y%m%d_%H%M%S_%L")
-        output_path = File.join(request.output_dir, "#{timestamp}_#{i}.png")
-        b64 = img["b64_json"] || img["base64"]
-        if b64
-          File.binwrite(output_path, Base64.decode64(b64))
+      output_path = File.join(request.output_dir, "#{timestamp}_#{i}.png")
+      if img["b64_json"]
+        File.binwrite(output_path, Base64.decode64(img["b64_json"]))
+        paths << output_path
+      elsif img["url"]
+        img_uri = URI.parse(img["url"])
+        img_http = Net::HTTP.new(img_uri.host, img_uri.port)
+        img_http.use_ssl = (img_uri.scheme == "https")
+        img_resp = img_http.request(Net::HTTP::Get.new(img_uri))
+        if img_resp.is_a?(Net::HTTPSuccess)
+          File.binwrite(output_path, img_resp.body)
           paths << output_path
         end
       end
     end
 
     return Provider::GenerationResult.new(error: "Failed to save images") if paths.empty?
-
-    seed_val = request.seed && request.seed >= 0 ? request.seed : nil
-    Provider::GenerationResult.new(paths: paths, seeds: [seed_val] * paths.length, elapsed: elapsed)
+    Provider::GenerationResult.new(paths: paths, seeds: [nil] * paths.length, elapsed: elapsed)
   rescue => e
     Provider::GenerationResult.new(error: "Fireworks: #{e.message}")
   end
