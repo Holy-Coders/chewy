@@ -3735,6 +3735,7 @@ class Chewy
       status_lines << center.call("#{@spinner.view} #{gen_text} #{dim.render(dots)}#{dots_pad}")
       status_lines << ""
       status_lines << center.call(dim.render(status_text))
+      status_lines << center.call(dim.render(elapsed_str)) if elapsed > 0
     end
 
     if @gen_total_batch > 1
