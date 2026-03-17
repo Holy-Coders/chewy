@@ -50,12 +50,15 @@ jobs:
           git clone https://x-access-token:${TAP_TOKEN}@github.com/Holy-Coders/homebrew-chewy.git tap
           cd tap
 
+          # Copy the full formula from source, then set the correct url/version/sha256
+          cp "$GITHUB_WORKSPACE/Formula/chewy.rb" Formula/chewy.rb
+          cp "$GITHUB_WORKSPACE/Formula/sd-cpp.rb" Formula/sd-cpp.rb
           sed -i "s|url \".*chewy.*tar.gz\"|url \"${URL}\"|" Formula/chewy.rb
-          sed -i "s|sha256 \".*\"|sha256 \"${SHA}\"|" Formula/chewy.rb
+          sed -i "s|sha256 \"PLACEHOLDER\"|sha256 \"${SHA}\"|" Formula/chewy.rb
           sed -i "s|version \".*\"|version \"${VERSION}\"|" Formula/chewy.rb
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/chewy.rb
+          git add Formula/
           git diff --cached --quiet || git commit -m "Update chewy to v${VERSION}"
           git push
