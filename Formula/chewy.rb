@@ -1,8 +1,8 @@
 class Chewy < Formula
   desc "TUI for local AI image generation with Stable Diffusion and FLUX"
   homepage "https://github.com/Holy-Coders/chewy"
-  url "https://github.com/Holy-Coders/chewy/archive/refs/tags/v0.1.0.tar.gz"
-  version "0.1.0"
+  url "https://github.com/Holy-Coders/chewy/archive/refs/tags/v0.2.0.tar.gz"
+  version "0.2.0"
   sha256 "PLACEHOLDER"
   license "MIT"
 
@@ -10,15 +10,13 @@ class Chewy < Formula
   depends_on "ruby"
 
   def install
-    ENV["GEM_HOME"] = libexec/"gems"
-    ENV["GEM_PATH"] = libexec/"gems"
+    ENV["GEM_HOME"] = libexec
+    ENV["GEM_PATH"] = libexec
 
-    system "gem", "install", "bundler", "--no-document", "--install-dir", libexec/"gems"
-
-    bundle = libexec/"gems/bin/bundle"
-    system bundle, "config", "set", "--local", "path", libexec/"gems"
-    system bundle, "config", "set", "--local", "without", "development:test"
-    system bundle, "install"
+    system "gem", "install", "bubbletea", "-v", "0.1.3", "--no-document", "--install-dir", libexec
+    system "gem", "install", "lipgloss", "-v", "0.2.2", "--no-document", "--install-dir", libexec
+    system "gem", "install", "bubbles", "-v", "0.1.1", "--no-document", "--install-dir", libexec
+    system "gem", "install", "chunky_png", "-v", "1.4.0", "--no-document", "--install-dir", libexec
 
     libexec.install "chewy.rb"
     libexec.install "Gemfile"
@@ -28,8 +26,8 @@ class Chewy < Formula
 
     (bin/"chewy").write <<~BASH
       #!/bin/bash
-      export GEM_HOME="#{libexec}/gems"
-      export GEM_PATH="#{libexec}/gems"
+      export GEM_HOME="#{libexec}"
+      export GEM_PATH="#{libexec}"
       exec "#{Formula["ruby"].opt_bin}/ruby" "#{libexec}/chewy.rb" "$@"
     BASH
   end
