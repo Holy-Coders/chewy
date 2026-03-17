@@ -57,23 +57,102 @@ FLUX_COMPANION_FILES = {
   },
 }.freeze
 
-# ---------- Theme ----------
+# ---------- Themes ----------
 
+THEMES = {
+  "midnight" => {
+    "primary" => "#874BFD", "secondary" => "#7B2FFF", "accent" => "#FF75B5",
+    "success" => "#50FA7B", "warning" => "#F1FA8C", "error" => "#FF5555",
+    "text" => "#E2E2E8", "text_dim" => "#8888A0", "text_muted" => "#5C5C78",
+    "surface" => "#1E1E2E", "border_dim" => "#3A3A52", "border_focus" => "#874BFD",
+    "bar_text" => "#FFFFFF",
+  },
+  "dracula" => {
+    "primary" => "#BD93F9", "secondary" => "#8B5CF6", "accent" => "#FF79C6",
+    "success" => "#50FA7B", "warning" => "#F1FA8C", "error" => "#FF5555",
+    "text" => "#F8F8F2", "text_dim" => "#8895C7", "text_muted" => "#606888",
+    "surface" => "#282A36", "border_dim" => "#44475A", "border_focus" => "#BD93F9",
+    "bar_text" => "#FFFFFF",
+  },
+  "catppuccin" => {
+    "primary" => "#CBA6F7", "secondary" => "#89B4FA", "accent" => "#F5C2E7",
+    "success" => "#A6E3A1", "warning" => "#F9E2AF", "error" => "#F38BA8",
+    "text" => "#CDD6F4", "text_dim" => "#9399B2", "text_muted" => "#6C7086",
+    "surface" => "#1E1E2E", "border_dim" => "#313244", "border_focus" => "#CBA6F7",
+    "bar_text" => "#1E1E2E",
+  },
+  "tokyo night" => {
+    "primary" => "#7AA2F7", "secondary" => "#7DCFFF", "accent" => "#BB9AF7",
+    "success" => "#9ECE6A", "warning" => "#E0AF68", "error" => "#F7768E",
+    "text" => "#C0CAF5", "text_dim" => "#737AA2", "text_muted" => "#545C7E",
+    "surface" => "#1A1B26", "border_dim" => "#33364E", "border_focus" => "#7AA2F7",
+    "bar_text" => "#1A1B26",
+  },
+  "gruvbox" => {
+    "primary" => "#FE8019", "secondary" => "#D79921", "accent" => "#FB4934",
+    "success" => "#B8BB26", "warning" => "#FABD2F", "error" => "#CC241D",
+    "text" => "#EBDBB2", "text_dim" => "#A89984", "text_muted" => "#7C6F64",
+    "surface" => "#282828", "border_dim" => "#504945", "border_focus" => "#FE8019",
+    "bar_text" => "#1D2021",
+  },
+  "nord" => {
+    "primary" => "#88C0D0", "secondary" => "#5E81AC", "accent" => "#B48EAD",
+    "success" => "#A3BE8C", "warning" => "#EBCB8B", "error" => "#BF616A",
+    "text" => "#ECEFF4", "text_dim" => "#8FBCBB", "text_muted" => "#616E88",
+    "surface" => "#2E3440", "border_dim" => "#434C5E", "border_focus" => "#88C0D0",
+    "bar_text" => "#2E3440",
+  },
+  "rose pine" => {
+    "primary" => "#C4A7E7", "secondary" => "#31748F", "accent" => "#EBBCBA",
+    "success" => "#9CCFD8", "warning" => "#F6C177", "error" => "#EB6F92",
+    "text" => "#E0DEF4", "text_dim" => "#908CAA", "text_muted" => "#6E6A86",
+    "surface" => "#191724", "border_dim" => "#26233A", "border_focus" => "#C4A7E7",
+    "bar_text" => "#191724",
+  },
+  "solarized" => {
+    "primary" => "#268BD2", "secondary" => "#2AA198", "accent" => "#D33682",
+    "success" => "#859900", "warning" => "#B58900", "error" => "#DC322F",
+    "text" => "#93A1A1", "text_dim" => "#839496", "text_muted" => "#657B83",
+    "surface" => "#002B36", "border_dim" => "#073642", "border_focus" => "#268BD2",
+    "bar_text" => "#FDF6E3",
+  },
+  "light" => {
+    "primary" => "#6C5CE7", "secondary" => "#0984E3", "accent" => "#E84393",
+    "success" => "#00B894", "warning" => "#D4A017", "error" => "#D63031",
+    "text" => "#2D3436", "text_dim" => "#636E72", "text_muted" => "#95A5A6",
+    "surface" => "#F5F5F5", "border_dim" => "#DFE6E9", "border_focus" => "#6C5CE7",
+    "bar_text" => "#FFFFFF",
+  },
+}.freeze
+
+THEME_NAMES = THEMES.keys.freeze
+
+# Dynamic theme module — reads from the active theme hash
 module Theme
-  PRIMARY     = "#874BFD"
-  SECONDARY   = "#7B2FFF"
-  ACCENT      = "#FF75B5"
-  SUCCESS     = "#22C55E"
-  WARNING     = "#EAB308"
-  ERROR       = "#EF4444"
-  TEXT        = "#1A1A2E"
-  TEXT_DIM    = "#555555"
-  TEXT_MUTED  = "#888888"
-  SURFACE     = "#F0F0F0"
-  BORDER_DIM  = "#AAAAAA"
-  BORDER_FOCUS = "#874BFD"
+  @current = THEMES["midnight"]
 
-  # Generate a gradient between two colors for visual flair
+  def self.set(name)
+    @current = THEMES[name] || THEMES["midnight"]
+  end
+
+  def self.current_name
+    THEMES.find { |k, v| v == @current }&.first || "midnight"
+  end
+
+  def self.PRIMARY;      @current["primary"]; end
+  def self.SECONDARY;    @current["secondary"]; end
+  def self.ACCENT;       @current["accent"]; end
+  def self.SUCCESS;      @current["success"]; end
+  def self.WARNING;      @current["warning"]; end
+  def self.ERROR;        @current["error"]; end
+  def self.TEXT;         @current["text"]; end
+  def self.TEXT_DIM;     @current["text_dim"]; end
+  def self.TEXT_MUTED;   @current["text_muted"]; end
+  def self.SURFACE;      @current["surface"]; end
+  def self.BORDER_DIM;   @current["border_dim"]; end
+  def self.BORDER_FOCUS; @current["border_focus"]; end
+  def self.BAR_TEXT;     @current["bar_text"]; end
+
   def self.gradient(c1, c2, steps)
     Lipgloss::ColorBlend.blends(c1, c2, steps, mode: Lipgloss::ColorBlend::HCL)
   rescue
@@ -105,6 +184,11 @@ class GenerationDoneMessage < Bubbletea::Message
 end
 
 class RevealTickMessage < Bubbletea::Message
+  attr_reader :phase
+  def initialize(phase:) @phase = phase end
+end
+
+class SplashTickMessage < Bubbletea::Message
   attr_reader :phase
   def initialize(phase:) @phase = phase end
 end
@@ -174,6 +258,7 @@ class Chewy
   def initialize
     @config = load_config
     @first_run = !File.exist?(CONFIG_PATH)
+    Theme.set(@config["theme"] || "midnight")
     save_config if @first_run
 
     @width = 80; @height = 24
@@ -198,15 +283,15 @@ class Chewy
     @prompt_input = Bubbles::TextInput.new
     @prompt_input.placeholder = "Describe your image..."
     @prompt_input.prompt = ""
-    @prompt_input.placeholder_style = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED).italic(true)
-    @prompt_input.text_style = Lipgloss::Style.new.foreground(Theme::TEXT)
+    @prompt_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
+    @prompt_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
     @prompt_input.focus
 
     @negative_input = Bubbles::TextInput.new
     @negative_input.placeholder = "Negative prompt (optional)..."
     @negative_input.prompt = ""
-    @negative_input.placeholder_style = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED).italic(true)
-    @negative_input.text_style = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    @negative_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
+    @negative_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
 
     # Prompt history
     @prompt_history = []
@@ -236,8 +321,8 @@ class Chewy
     @gen_total_batch = 1
     @last_seed = nil
     @spinner = Bubbles::Spinner.new(spinner: Bubbles::Spinners::PULSE)
-    @spinner.style = Lipgloss::Style.new.foreground(Theme::PRIMARY)
-    @progress = Bubbles::Progress.new(width: 30, gradient: [Theme::PRIMARY, Theme::ACCENT])
+    @spinner.style = Lipgloss::Style.new.foreground(Theme.PRIMARY)
+    @progress = Bubbles::Progress.new(width: 30, gradient: [Theme.PRIMARY, Theme.ACCENT])
     @last_output_path = nil
     @last_generation_time = nil
     @status_message = @first_run ? "Config created at #{CONFIG_PATH}" : nil
@@ -249,7 +334,7 @@ class Chewy
     @output_dir = ENV["CHEWY_OUTPUT_DIR"] || @config["output_dir"] || "outputs"
     @lora_dir = ENV["CHEWY_LORA_DIR"] || @config["lora_dir"] || File.expand_path("~/loras")
 
-    # Overlay: nil, :models, :download, :history, :lora, :preset, :hf_token, :gallery, :fullscreen_image, :file_picker
+    # Overlay: nil, :models, :download, :history, :lora, :preset, :hf_token, :gallery, :fullscreen_image, :file_picker, :theme
     @overlay = nil
 
     # img2img
@@ -271,8 +356,8 @@ class Chewy
     @hf_token_input = Bubbles::TextInput.new
     @hf_token_input.placeholder = "hf_..."
     @hf_token_input.prompt = ""
-    @hf_token_input.placeholder_style = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED).italic(true)
-    @hf_token_input.text_style = Lipgloss::Style.new.foreground(Theme::TEXT)
+    @hf_token_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
+    @hf_token_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
     @hf_token_pending_action = nil
 
     # Image preview cache
@@ -299,8 +384,8 @@ class Chewy
     @download_search_input = Bubbles::TextInput.new
     @download_search_input.placeholder = "Search HuggingFace models..."
     @download_search_input.prompt = ""
-    @download_search_input.placeholder_style = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED).italic(true)
-    @download_search_input.text_style = Lipgloss::Style.new.foreground(Theme::TEXT)
+    @download_search_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
+    @download_search_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
     @download_search_focused = false
 
     # Generation history
@@ -330,6 +415,14 @@ class Chewy
     @companion_download_size = 0
     @companion_queue = []
     @companion_hf_token = nil
+
+    # Theme picker
+    @theme_index = THEME_NAMES.index(Theme.current_name) || 0
+    @theme_original = Theme.current_name
+
+    # Splash screen
+    @splash = true
+    @splash_phase = 0
   end
 
   # ========== Config ==========
@@ -358,6 +451,7 @@ class Chewy
       "last_model" => @selected_model_path,
       "incompatible_models" => @incompatible_models || [],
       "model_types" => @model_types || {},
+      "theme" => Theme.current_name,
     }
     File.write(CONFIG_PATH, YAML.dump(data))
   rescue
@@ -385,7 +479,8 @@ class Chewy
     scan_loras
     load_generation_history
     _spinner, spinner_cmd = @spinner.init
-    [self, spinner_cmd]
+    splash_cmd = Bubbletea.tick(0.4) { SplashTickMessage.new(phase: 1) }
+    [self, Bubbletea.batch(spinner_cmd, splash_cmd)]
   end
 
   # ========== Update ==========
@@ -455,7 +550,10 @@ class Chewy
       [self, nil]
     when ModelValidatedMessage
       handle_model_validated(message)
+    when SplashTickMessage
+      handle_splash_tick(message)
     when Bubbletea::KeyMessage
+      return dismiss_splash if @splash
       handle_key(message)
     else
       forward_to_focused(message)
@@ -465,21 +563,62 @@ class Chewy
   # ========== View ==========
 
   def view
-    case @overlay
-    when :models   then render_overlay_panel("Models", render_models_content, render_models_status)
-    when :download then render_download_view
-    when :history  then render_overlay_panel("Generation History", render_history_content, render_history_status)
-    when :lora     then render_overlay_panel("LoRA Selection", render_lora_content, render_lora_status)
-    when :preset   then render_overlay_panel("Presets", render_preset_content, render_preset_status)
-    when :hf_token then render_overlay_panel("HuggingFace Token", render_hf_token_content, render_hf_token_status)
-    when :gallery  then render_gallery_view
-    when :fullscreen_image then render_fullscreen_image
-    when :file_picker then render_overlay_panel("Select Image", render_file_picker_content, render_file_picker_status)
-    else render_main_view
+    apply_theme_styles
+
+    content = if @splash
+      render_splash
+    else
+      case @overlay
+      when :models   then render_overlay_panel("Models", render_models_content, render_models_status)
+      when :download then render_download_view
+      when :history  then render_overlay_panel("Generation History", render_history_content, render_history_status)
+      when :lora     then render_overlay_panel("LoRA Selection", render_lora_content, render_lora_status)
+      when :preset   then render_overlay_panel("Presets", render_preset_content, render_preset_status)
+      when :hf_token then render_overlay_panel("HuggingFace Token", render_hf_token_content, render_hf_token_status)
+      when :gallery  then render_gallery_view
+      when :fullscreen_image then render_fullscreen_image
+      when :file_picker then render_overlay_panel("Select Image", render_file_picker_content, render_file_picker_status)
+      when :theme then render_overlay_panel("Theme", render_theme_content, render_theme_status)
+      else render_main_view
+      end
     end
+
+    # Fill entire terminal with theme surface background
+    output = Lipgloss::Style.new.background(Theme.SURFACE).width(@width).height(@height).render(content)
+
+    # Every inner style emits \e[0m (SGR reset), which clears background back to
+    # the terminal default. Re-apply the surface background after every reset so
+    # the theme color persists across all styled text.
+    bg_seq = surface_bg_escape
+    output.gsub("\e[0m", "\e[0m#{bg_seq}")
   end
 
   private
+
+  # Refresh all input widget styles from the active theme (needed for live theme switching)
+  def apply_theme_styles
+    # Cursor: style is used when cursor is visible (rendered with .reverse),
+    # text_style is used when cursor blinks off (renders the character underneath)
+    cur_style = Lipgloss::Style.new.foreground(Theme.TEXT).background(Theme.SURFACE)
+    cur_text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
+    placeholder = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
+    text_fg = Lipgloss::Style.new.foreground(Theme.TEXT)
+    text_dim_fg = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+
+    [@prompt_input, @hf_token_input, @download_search_input].each do |input|
+      input.placeholder_style = placeholder
+      input.text_style = text_fg
+      input.cursor.style = cur_style
+      input.cursor.text_style = cur_text_style
+    end
+    @negative_input.placeholder_style = placeholder
+    @negative_input.text_style = text_dim_fg
+    @negative_input.cursor.style = cur_style
+    @negative_input.cursor.text_style = cur_text_style
+
+    @spinner.style = Lipgloss::Style.new.foreground(Theme.PRIMARY)
+    @progress = Bubbles::Progress.new(width: @progress&.instance_variable_get(:@width) || 30, gradient: [Theme.PRIMARY, Theme.ACCENT])
+  end
 
   # ========== Model Scanning ==========
 
@@ -522,8 +661,8 @@ class Chewy
     @model_list = Bubbles::List.new(items, width: @width - 8, height: [@height - 10, 6].max)
     @model_list.show_title = false
     @model_list.show_status_bar = false
-    @model_list.selected_item_style = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true)
-    @model_list.item_style = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    @model_list.selected_item_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    @model_list.item_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
 
     if sorted.any?
       last = @config["last_model"]
@@ -679,13 +818,65 @@ class Chewy
     [self, cmd]
   end
 
+  # ========== Splash Screen ==========
+
+  SPLASH_PHASES = 6 # phases 0..5: very blocky → clear → dismiss
+  SPLASH_PIXELATE = [32, 16, 8, 4, 2, nil].freeze
+  SPLASH_DELAYS = [0.3, 0.25, 0.2, 0.15, 0.8, 0.0].freeze # linger at full res before dismiss
+
+  def handle_splash_tick(message)
+    return [self, nil] unless @splash
+    phase = message.phase
+    if phase >= SPLASH_PHASES
+      return dismiss_splash
+    end
+    @splash_phase = phase
+    cmd = Bubbletea.tick(SPLASH_DELAYS[phase]) { SplashTickMessage.new(phase: phase + 1) }
+    [self, cmd]
+  end
+
+  def dismiss_splash
+    @splash = false
+    @splash_phase = nil
+    [self, nil]
+  end
+
+  def render_splash
+    logo_path = File.join(__dir__, "logo.png")
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+    title_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    center = ->(s) { Lipgloss::Style.new.width(@width).align(:center).render(s) }
+
+    max_logo_h = [(@height * 0.6).to_i, 12].max
+    max_logo_w = [(@width * 0.4).to_i, 24].max
+
+    logo_img = if File.exist?(logo_path)
+      pixelate = SPLASH_PIXELATE[@splash_phase || 0]
+      render_logo_halfblocks(logo_path, max_logo_w, max_logo_h, pixelate: pixelate)
+    end
+
+    lines = []
+    if logo_img
+      centered_logo = center_image(logo_img, @width)
+      lines += centered_logo.split("\n")
+    end
+    lines << ""
+    lines << center.call(title_style.render("C H E W Y"))
+    lines << center.call(dim.render("v#{CHEWY_VERSION}"))
+    lines << ""
+    lines << center.call(dim.render("press any key to continue"))
+
+    pad_top = [((@height - lines.length) / 2), 0].max
+    (Array.new(pad_top, "") + lines).join("\n")
+  end
+
   # ========== Component Resizing ==========
 
   def resize_components
     lw = left_panel_width
     @prompt_input.width = lw - 6
     @negative_input.width = lw - 6
-    @progress = Bubbles::Progress.new(width: [right_panel_width - 10, 20].max, gradient: [Theme::PRIMARY, Theme::ACCENT])
+    @progress = Bubbles::Progress.new(width: [right_panel_width - 10, 20].max, gradient: [Theme.PRIMARY, Theme.ACCENT])
     @model_list.width = @width - 8 if @model_list
     @model_list.height = [@height - 10, 6].max if @model_list
     @preview_cache = nil # invalidate on resize
@@ -742,6 +933,7 @@ class Chewy
     when "ctrl+g" then return toggle_overlay(:history)     # g = generation history
     when "ctrl+l" then return toggle_overlay(:lora)
     when "ctrl+p" then return toggle_overlay(:preset)
+    when "ctrl+t" then return toggle_overlay(:theme)
     when "ctrl+a" then return toggle_overlay(:gallery)    # a = album/gallery
     when "ctrl+o", "ctrl+e" then open_image(@last_output_path) if @last_output_path; return [self, nil]
     when "ctrl+f" then show_fullscreen_image(@last_output_path) if @last_output_path; return [self, nil]
@@ -1350,6 +1542,7 @@ class Chewy
     when :lora then scan_loras
     when :hf_token then @hf_token_input.focus
     when :preset then nil
+    when :theme then @theme_index = THEME_NAMES.index(Theme.current_name) || 0; @theme_original = Theme.current_name
     when :gallery then build_gallery
     when :file_picker then scan_file_picker_dir
     end
@@ -1396,11 +1589,23 @@ class Chewy
     [self, nil]
   end
 
+  # Model families that sd.cpp cannot run
+  INCOMPATIBLE_HF_PATTERNS = %w[qwen lumina pixart cogview unidiffuser].freeze
+
+  def sdcpp_compatible_repo?(repo)
+    id = (repo["id"] || "").downcase
+    tags = (repo["tags"] || []).map(&:downcase)
+    # Reject known incompatible model families
+    return false if INCOMPATIBLE_HF_PATTERNS.any? { |p| id.include?(p) || tags.any? { |t| t.include?(p) } }
+    true
+  end
+
   def fetch_repos_cmd(query = "gguf")
     search = URI.encode_www_form_component(query)
     Proc.new do
-      uri = URI.parse("#{HF_API_BASE}/models?pipeline_tag=text-to-image&search=#{search}&sort=downloads&direction=-1&limit=25")
-      repos = JSON.parse(hf_get(uri).body)
+      uri = URI.parse("#{HF_API_BASE}/models?pipeline_tag=text-to-image&search=#{search}&sort=downloads&direction=-1&limit=50")
+      all_repos = JSON.parse(hf_get(uri).body)
+      repos = all_repos.select { |r| sdcpp_compatible_repo?(r) }.first(25)
       ReposFetchedMessage.new(repos: repos)
     rescue => e
       ReposFetchErrorMessage.new(error: e.message)
@@ -1418,15 +1623,27 @@ class Chewy
     @repo_list = Bubbles::List.new(items, width: @width - 4, height: @height - 9)
     @repo_list.title = ""
     @repo_list.show_status_bar = false
+    @repo_list.selected_item_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    @repo_list.item_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
     [self, nil]
   end
+
+  # Files that are companion/auxiliary, not standalone diffusion models
+  COMPANION_FILE_PATTERNS = %w[clip_l clip_g t5xxl ae. vae. text_encoder taesd].freeze
 
   def fetch_files_cmd(repo_id)
     @fetching = true; @selected_repo_id = repo_id
     Proc.new do
       uri = URI.parse("#{HF_API_BASE}/models/#{repo_id}/tree/main")
       all = JSON.parse(hf_get(uri).body)
-      model_files = all.select { |f| f["type"] == "file" && MODEL_EXTENSIONS.any? { |ext| f["path"].end_with?(ext) } }
+      model_files = all.select { |f|
+        next false unless f["type"] == "file"
+        next false unless MODEL_EXTENSIONS.any? { |ext| f["path"].end_with?(ext) }
+        basename = File.basename(f["path"]).downcase
+        # Filter out companion/auxiliary files
+        next false if COMPANION_FILE_PATTERNS.any? { |p| basename.start_with?(p) }
+        true
+      }
       FilesFetchedMessage.new(files: model_files, repo_id: repo_id)
     rescue => e
       FilesFetchErrorMessage.new(error: e.message)
@@ -1440,6 +1657,8 @@ class Chewy
     @file_list = Bubbles::List.new(items, width: @width - 4, height: @height - 9)
     @file_list.title = ""
     @file_list.show_status_bar = false
+    @file_list.selected_item_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    @file_list.item_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
     [self, nil]
   end
 
@@ -1487,6 +1706,7 @@ class Chewy
     when :history  then handle_history_panel_key(message)
     when :lora     then handle_lora_panel_key(message)
     when :preset   then handle_preset_panel_key(message)
+    when :theme    then handle_theme_key(message)
     when :hf_token then handle_hf_token_key(message)
     when :gallery  then handle_gallery_key(message)
     when :fullscreen_image then handle_fullscreen_key(message)
@@ -1643,6 +1863,8 @@ class Chewy
     @history_list = Bubbles::List.new(items, width: @width - 4, height: @height - 6)
     @history_list.title = "Generation History"
     @history_list.show_status_bar = false
+    @history_list.selected_item_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    @history_list.item_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
   end
 
   def handle_history_panel_key(message)
@@ -2054,11 +2276,11 @@ class Chewy
   end
 
   def render_file_picker_content
-    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
-    accent = Lipgloss::Style.new.foreground(Theme::ACCENT)
-    dir_style = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true)
-    file_style = Lipgloss::Style.new.foreground(Theme::TEXT)
-    selected_style = Lipgloss::Style.new.foreground(Theme::ACCENT).bold(true)
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    accent = Lipgloss::Style.new.foreground(Theme.ACCENT)
+    dir_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    file_style = Lipgloss::Style.new.foreground(Theme.TEXT)
+    selected_style = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true)
 
     # Current directory header
     header = dim.render("  ") + accent.render(@file_picker_dir)
@@ -2119,6 +2341,71 @@ class Chewy
     pad = [(target_width - visible_width) / 2, 0].max
     padding = " " * pad
     lines.map { |l| "#{padding}#{l}" }.join("\n")
+  end
+
+  # Theme-aware logo renderer: transparent pixels -> surface color,
+  # dark strokes -> white on dark themes, black on light themes.
+  def render_logo_halfblocks(path, max_w, max_h, pixelate: nil)
+    return nil unless path && File.exist?(path)
+
+    image = ChunkyPNG::Image.from_file(path)
+    pixel_h = max_h * 2
+
+    scale_w = max_w.to_f / image.width
+    scale_h = pixel_h.to_f / image.height
+    scale = [scale_w, scale_h].min
+
+    new_w = (image.width * scale).to_i.clamp(1, max_w)
+    new_h = (image.height * scale).to_i.clamp(1, pixel_h)
+
+    resized = image.resample_nearest_neighbor(new_w, new_h)
+
+    if pixelate && pixelate > 1
+      tiny_w = [new_w / pixelate, 2].max
+      tiny_h = [new_h / pixelate, 2].max
+      tiny = resized.resample_nearest_neighbor(tiny_w, tiny_h)
+      resized = tiny.resample_nearest_neighbor(new_w, new_h)
+    end
+
+    # Parse surface color for background
+    surf = Theme.SURFACE.delete("#")
+    sr = surf[0..1].to_i(16); sg = surf[2..3].to_i(16); sb = surf[4..5].to_i(16)
+    # Dark theme if surface luminance is low
+    dark_theme = (0.299 * sr + 0.587 * sg + 0.114 * sb) / 255.0 < 0.5
+
+    lines = []
+    y = 0
+    while y < new_h
+      line = +""
+      new_w.times do |x|
+        top = resized[x, y]
+        bottom = (y + 1 < new_h) ? resized[x, y + 1] : ChunkyPNG::Color::TRANSPARENT
+
+        tr, tg, tb = logo_pixel_color(top, sr, sg, sb, dark_theme)
+        br, bg_, bb = logo_pixel_color(bottom, sr, sg, sb, dark_theme)
+
+        line << "\e[38;2;#{tr};#{tg};#{tb}m\e[48;2;#{br};#{bg_};#{bb}m\u2580\e[0m"
+      end
+      lines << line
+      y += 2
+    end
+
+    lines.join("\n")
+  rescue
+    nil
+  end
+
+  def logo_pixel_color(pixel, sr, sg, sb, dark_theme)
+    a = ChunkyPNG::Color.a(pixel)
+    if a < 128
+      [sr, sg, sb]
+    else
+      if dark_theme
+        [255 - ChunkyPNG::Color.r(pixel), 255 - ChunkyPNG::Color.g(pixel), 255 - ChunkyPNG::Color.b(pixel)]
+      else
+        [ChunkyPNG::Color.r(pixel), ChunkyPNG::Color.g(pixel), ChunkyPNG::Color.b(pixel)]
+      end
+    end
   end
 
   def render_image_halfblocks(path, max_w, max_h, pixelate: nil)
@@ -2244,8 +2531,8 @@ class Chewy
   end
 
   def render_header
-    logo = Theme.gradient_text(" chewy ", Theme::PRIMARY, Theme::ACCENT)
-    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    logo = Theme.gradient_text(" chewy ", Theme.PRIMARY, Theme.ACCENT)
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
 
     model_info = if @selected_model_path
       name = File.basename(@selected_model_path, File.extname(@selected_model_path))
@@ -2253,14 +2540,14 @@ class Chewy
       cached_type = @model_types[@selected_model_path]
       type_label = if is_flux || cached_type == "FLUX"
         ok = flux_companions_present?
-        s = Lipgloss::Style.new.foreground(ok ? Theme::SUCCESS : Theme::WARNING).bold(true)
+        s = Lipgloss::Style.new.foreground(ok ? Theme.SUCCESS : Theme.WARNING).bold(true)
         " #{s.render(ok ? 'FLUX' : 'FLUX!')}"
       elsif cached_type
         " #{dim.render(cached_type)}"
       else
         " #{dim.render('SD')}"
       end
-      " #{dim.render('|')} #{Lipgloss::Style.new.foreground(Theme::TEXT).render(name)}#{type_label}"
+      " #{dim.render('|')} #{Lipgloss::Style.new.foreground(Theme.TEXT).render(name)}#{type_label}"
     else
       " #{dim.render('| no model selected')}"
     end
@@ -2269,7 +2556,7 @@ class Chewy
       name = File.basename(@init_image_path)
       # Truncate filename if too long
       name = name[0, 20] + "..." if name.length > 23
-      i2i = Lipgloss::Style.new.foreground(Theme::ACCENT).bold(true)
+      i2i = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true)
       " #{dim.render('|')} #{i2i.render('img2img')} #{dim.render(name)}"
     else
       ""
@@ -2277,7 +2564,7 @@ class Chewy
 
     model_hint = dim.render("  [^n] models")
 
-    Lipgloss::Style.new.width(@width).bold(true).render("#{logo}#{model_info}#{model_hint}#{img2img_badge}")
+    Lipgloss::Style.new.width(@width).bold(true).background(Theme.SURFACE).render("#{logo}#{model_info}#{model_hint}#{img2img_badge}")
   end
 
   def left_panel_heights
@@ -2318,7 +2605,7 @@ class Chewy
     prompt_h, negative_h, params_h = left_panel_heights
     total_left = prompt_h + negative_h + params_h
 
-    border_color = Theme::BORDER_DIM
+    border_color = Theme.BORDER_DIM
 
     content = if @generating
       render_generating_preview(rw - 4, total_left - 2)
@@ -2329,7 +2616,7 @@ class Chewy
     end
 
     Lipgloss::Style.new
-      .border(:rounded).border_foreground(border_color)
+      .border(:rounded).border_foreground(border_color).background(Theme.SURFACE)
       .width(rw - 4).height(total_left - 2).render(content)
   end
 
@@ -2347,7 +2634,7 @@ class Chewy
     img_str = render_image(@last_output_path, max_w, max_h - 2, pixelate: pixelate)
     if img_str
       centered_img = center_image(img_str, max_w)
-      dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+      dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
       info = "#{File.basename(@last_output_path)}  #{dim.render("| ^e open | #{@last_generation_time}s")}"
       seed_info = @last_seed ? "  #{dim.render("| seed #{@last_seed}")}" : ""
       info_line = Lipgloss::Style.new.width(max_w).align(:center).render("#{info}#{seed_info}")
@@ -2364,8 +2651,8 @@ class Chewy
   end
 
   def render_generating_preview(max_w, max_h)
-    accent = Lipgloss::Style.new.foreground(Theme::ACCENT).bold(true)
-    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    accent = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true)
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
     center = ->(s) { Lipgloss::Style.new.width(max_w).align(:center).render(s) }
 
     @gen_start_time ||= Time.now
@@ -2450,14 +2737,14 @@ class Chewy
   end
 
   def render_empty_preview(max_w, max_h)
-    dim = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED)
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
     center = ->(s) { Lipgloss::Style.new.width(max_w).align(:center).render(s) }
 
     # Show logo in empty preview area
-    logo_path = File.join(__dir__, "logo.jpeg")
+    logo_path = File.join(__dir__, "logo.png")
     logo_img = if File.exist?(logo_path)
-      logo_h = [max_h - 4, 8].min
-      render_image(logo_path, [max_w, 20].min, logo_h)
+      logo_h = max_h - 4
+      render_logo_halfblocks(logo_path, max_w - 4, logo_h)
     end
 
     if logo_img
@@ -2474,14 +2761,14 @@ class Chewy
 
   def render_prompt_section(tw, box_h)
     focused = @focus == FOCUS_PROMPT
-    border_color = focused ? Theme::BORDER_FOCUS : Theme::BORDER_DIM
+    border_color = focused ? Theme.BORDER_FOCUS : Theme.BORDER_DIM
 
-    label_style = Lipgloss::Style.new.foreground(focused ? Theme::PRIMARY : Theme::TEXT_DIM).bold(focused)
+    label_style = Lipgloss::Style.new.foreground(focused ? Theme.PRIMARY : Theme.TEXT_DIM).bold(focused)
     label = label_style.render("Prompt")
 
     lora_tags = if @selected_loras.any?
-      tag_style = Lipgloss::Style.new.foreground(Theme::ACCENT).bold(true)
-      dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+      tag_style = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true)
+      dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
       tags = @selected_loras.map { |l| tag_style.render("[#{l[:name]}:#{l[:weight]}]") }
       "\n#{dim.render("LoRA:")} #{tags.join(' ')}"
     else
@@ -2491,32 +2778,32 @@ class Chewy
     content = "#{label}\n#{@prompt_input.view}#{lora_tags}"
 
     Lipgloss::Style.new
-      .border(:rounded).border_foreground(border_color)
+      .border(:rounded).border_foreground(border_color).background(Theme.SURFACE)
       .width(tw - 2).height(box_h - 2).render(content)
   end
 
   def render_negative_section(tw, box_h)
     focused = @focus == FOCUS_NEGATIVE
-    border_color = focused ? Theme::BORDER_FOCUS : Theme::BORDER_DIM
+    border_color = focused ? Theme.BORDER_FOCUS : Theme.BORDER_DIM
 
-    label_style = Lipgloss::Style.new.foreground(focused ? Theme::ACCENT : Theme::TEXT_DIM).bold(focused)
+    label_style = Lipgloss::Style.new.foreground(focused ? Theme.ACCENT : Theme.TEXT_DIM).bold(focused)
     label = label_style.render("Negative Prompt")
 
     content = "#{label}\n#{@negative_input.view}"
 
     Lipgloss::Style.new
-      .border(:rounded).border_foreground(border_color)
+      .border(:rounded).border_foreground(border_color).background(Theme.SURFACE)
       .width(tw - 2).height(box_h - 2).render(content)
   end
 
   def render_params_section(tw, box_h)
     focused = @focus == FOCUS_PARAMS
-    border_color = focused ? Theme::BORDER_FOCUS : Theme::BORDER_DIM
+    border_color = focused ? Theme.BORDER_FOCUS : Theme.BORDER_DIM
 
-    label_style = Lipgloss::Style.new.foreground(focused ? Theme::PRIMARY : Theme::TEXT_DIM).bold(focused)
+    label_style = Lipgloss::Style.new.foreground(focused ? Theme.PRIMARY : Theme.TEXT_DIM).bold(focused)
     label = label_style.render("Parameters")
 
-    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
     separator = dim.render("─" * [tw - 6, 4].max)
 
     param_lines = @param_display_keys.each_with_index.map do |key, i|
@@ -2524,24 +2811,25 @@ class Chewy
       value = param_value(key)
       selected = i == @param_index
 
+      val_style = Lipgloss::Style.new.foreground(Theme.TEXT)
       display = if @editing_param && selected
-        Lipgloss::Style.new.foreground(Theme::ACCENT).render(@param_edit_buffer) +
-          Lipgloss::Style.new.foreground(Theme::ACCENT).blink(true).render("_")
+        Lipgloss::Style.new.foreground(Theme.ACCENT).render(@param_edit_buffer) +
+          Lipgloss::Style.new.foreground(Theme.ACCENT).blink(true).render("_")
       elsif key == :sampler
-        arrow = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
-        "#{arrow.render("<")} #{value} #{arrow.render(">")}"
+        arrow = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+        "#{arrow.render("<")} #{val_style.render(value.to_s)} #{arrow.render(">")}"
       elsif key == :seed && value == -1
-        Lipgloss::Style.new.foreground(Theme::TEXT_DIM).italic(true).render("random")
+        Lipgloss::Style.new.foreground(Theme.TEXT_DIM).italic(true).render("random")
       elsif key == :strength
-        hint = @init_image_path ? "" : Lipgloss::Style.new.foreground(Theme::TEXT_MUTED).render(" (^b to set image)")
-        "#{value}#{hint}"
+        hint = @init_image_path ? "" : Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" (^b to set image)")
+        "#{val_style.render(value.to_s)}#{hint}"
       else
-        value.to_s
+        val_style.render(value.to_s)
       end
 
       if selected && focused
-        cursor = Lipgloss::Style.new.foreground(Theme::ACCENT).bold(true).render("> ")
-        lbl = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true).render(label_text)
+        cursor = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true).render("> ")
+        lbl = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true).render(label_text)
         "#{cursor}#{lbl}  #{display}"
       else
         "  #{dim.render(label_text)}  #{display}"
@@ -2550,7 +2838,7 @@ class Chewy
 
     content = "#{label}\n#{separator}\n#{param_lines.join("\n")}"
     Lipgloss::Style.new
-      .border(:rounded).border_foreground(border_color)
+      .border(:rounded).border_foreground(border_color).background(Theme.SURFACE)
       .width(tw - 2).height(box_h - 2).padding(0, 1).render(content)
   end
 
@@ -2570,12 +2858,12 @@ class Chewy
 
   def render_status_bar
     if @error_message
-      error_bar = Lipgloss::Style.new.background(Theme::ERROR).foreground(Theme::TEXT).width(@width).padding(0, 1)
+      error_bar = Lipgloss::Style.new.background(Theme.ERROR).foreground(Theme.BAR_TEXT).width(@width).padding(0, 1)
       return error_bar.render("! #{@error_message}")
     end
 
     if @companion_downloading
-      bar_style = Lipgloss::Style.new.background(Theme::SECONDARY).foreground(Theme::TEXT).width(@width).padding(0, 1)
+      bar_style = Lipgloss::Style.new.background(Theme.SECONDARY).foreground(Theme.BAR_TEXT).width(@width).padding(0, 1)
       current = (@companion_dest && File.exist?(@companion_dest)) ? File.size(@companion_dest) : 0
       total = @companion_download_size || 0
       pct = total > 0 ? (current.to_f / total) : 0
@@ -2587,7 +2875,7 @@ class Chewy
     end
 
     if @status_message
-      bar = Lipgloss::Style.new.background(Theme::PRIMARY).foreground(Theme::TEXT).width(@width).padding(0, 1)
+      bar = Lipgloss::Style.new.background(Theme.PRIMARY).foreground(Theme.BAR_TEXT).width(@width).padding(0, 1)
       return bar.render(@status_message)
     end
 
@@ -2596,12 +2884,12 @@ class Chewy
 
   def render_help_bar
     keys = context_keys
-    key_style = Lipgloss::Style.new.foreground(Theme::TEXT_DIM).bold(true)
-    desc_style = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED)
-    sep = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED).render(" | ")
+    key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
+    desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+    sep = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" | ")
 
     items = keys.map { |k, d| "#{key_style.render(k)} #{desc_style.render(d)}" }
-    Lipgloss::Style.new.width(@width).padding(0, 1).render(items.join(sep))
+    Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE).render(items.join(sep))
   end
 
   def context_keys
@@ -2616,7 +2904,7 @@ class Chewy
       base + [["enter", "edit"], ["j/k", "nav"]]
     else
       base
-    end + [["^b", "img2img"], ["^v", "paste img"], ["^d", "download"], ["^a", "gallery"], ["^g", "history"], ["^l", "lora"], ["^p", "preset"]] +
+    end + [["^b", "img2img"], ["^v", "paste img"], ["^d", "download"], ["^a", "gallery"], ["^g", "history"], ["^l", "lora"], ["^p", "preset"], ["^t", "theme"]] +
     (@init_image_path ? [["^u", "clear img"]] : []) +
     (@last_output_path ? [["^e", "open"], ["^f", "fullscreen"]] : []) +
     (@generating ? [["^x", "cancel"]] : [])
@@ -2625,11 +2913,11 @@ class Chewy
   # ========== Rendering: Models Overlay ==========
 
   def render_models_content
-    return "No models found — press d to download" if @model_paths.empty?
-    return "Loading..." unless @model_list
+    return Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("No models found — press d to download") if @model_paths.empty?
+    return Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("Loading...") unless @model_list
 
-    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
-    accent = Lipgloss::Style.new.foreground(Theme::ACCENT)
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    accent = Lipgloss::Style.new.foreground(Theme.ACCENT)
 
     list_view = @model_list.view
 
@@ -2645,7 +2933,7 @@ class Chewy
 
         type_tag = if is_flux
           ok = flux_companions_present?
-          s = Lipgloss::Style.new.foreground(ok ? Theme::SUCCESS : Theme::WARNING).bold(true)
+          s = Lipgloss::Style.new.foreground(ok ? Theme.SUCCESS : Theme.WARNING).bold(true)
           s.render(ok ? "FLUX" : "FLUX (needs companions)")
         else
           dim.render("SD")
@@ -2668,20 +2956,20 @@ class Chewy
 
   def render_overlay_panel(title, content, status_text)
     # Title bar
-    title_style = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true)
-    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    title_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
     title_bar = "#{title_style.render(title)}"
     separator = dim.render("─" * (@width - 6))
 
     body_content = "#{title_bar}\n#{separator}\n#{content}"
     body = Lipgloss::Style.new
-      .border(:rounded).border_foreground(Theme::PRIMARY)
+      .border(:rounded).border_foreground(Theme.PRIMARY).background(Theme.SURFACE)
       .width(@width - 4).height(@height - 4).padding(0, 1).render(body_content)
 
     # Status uses help bar style
-    key_style = Lipgloss::Style.new.foreground(Theme::TEXT_DIM).bold(true)
-    desc_style = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED)
-    status = Lipgloss::Style.new.width(@width).padding(0, 1)
+    key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
+    desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+    status = Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE)
       .render(format_help_text(status_text, key_style, desc_style))
 
     Lipgloss.join_vertical(:left, body, status)
@@ -2690,7 +2978,7 @@ class Chewy
   def format_help_text(text, key_style, desc_style)
     # Parse "key: action | key: action" format into styled text
     parts = text.split(" | ")
-    sep = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED).render(" | ")
+    sep = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" | ")
     parts.map do |part|
       if part.include?(": ")
         k, d = part.split(": ", 2)
@@ -2709,19 +2997,19 @@ class Chewy
     elsif @download_view == :files && @file_list
       @file_list.view
     else
-      "Loading..."
+      Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("Loading...")
     end
 
     title = @download_view == :files ? "Files in #{@selected_repo_id}" : "Download Models"
-    title_style = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true)
-    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    title_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
     separator = dim.render("─" * (@width - 6))
 
     # Search bar (only on repos view)
     search_bar = if @download_view == :repos
-      border_color = @download_search_focused ? Theme::BORDER_FOCUS : Theme::BORDER_DIM
-      search_label = Lipgloss::Style.new.foreground(Theme::TEXT_DIM).render("Search: ")
-      Lipgloss::Style.new.border(:rounded).border_foreground(border_color)
+      border_color = @download_search_focused ? Theme.BORDER_FOCUS : Theme.BORDER_DIM
+      search_label = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("Search: ")
+      Lipgloss::Style.new.border(:rounded).border_foreground(border_color).background(Theme.SURFACE)
         .width(@width - 8).render("#{search_label}#{@download_search_input.view}")
     end
 
@@ -2731,7 +3019,7 @@ class Chewy
     body_content = parts.join("\n")
 
     body = Lipgloss::Style.new
-      .border(:rounded).border_foreground(Theme::PRIMARY)
+      .border(:rounded).border_foreground(Theme.PRIMARY).background(Theme.SURFACE)
       .width(@width - 4).height(@height - 4).padding(0, 1).render(body_content)
     status = render_download_status_bar
     Lipgloss.join_vertical(:left, body, status)
@@ -2746,12 +3034,12 @@ class Chewy
         "#{format_bytes(current)} / #{format_bytes(@download_total)}" :
         format_bytes(current)
 
-      download_bar = Lipgloss::Style.new.background(Theme::SECONDARY).foreground(Theme::TEXT).width(@width).padding(0, 1)
+      download_bar = Lipgloss::Style.new.background(Theme.SECONDARY).foreground(Theme.BAR_TEXT).width(@width).padding(0, 1)
       return download_bar.render("#{@spinner.view} #{@download_filename} #{bar} #{size_text}")
     end
 
     if @error_message
-      error_bar = Lipgloss::Style.new.background(Theme::ERROR).foreground(Theme::TEXT).width(@width).padding(0, 1)
+      error_bar = Lipgloss::Style.new.background(Theme.ERROR).foreground(Theme.BAR_TEXT).width(@width).padding(0, 1)
       return error_bar.render("! #{@error_message}")
     end
 
@@ -2765,14 +3053,14 @@ class Chewy
       "tab: search | enter: browse | esc: close"
     end
 
-    key_style = Lipgloss::Style.new.foreground(Theme::TEXT_DIM).bold(true)
-    desc_style = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED)
-    Lipgloss::Style.new.width(@width).padding(0, 1)
+    key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
+    desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+    Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE)
       .render(format_help_text(status_text, key_style, desc_style))
   end
 
   def render_history_content
-    @history_list ? @history_list.view : "No history"
+    @history_list ? @history_list.view : Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("No history")
   end
 
   def render_history_status
@@ -2782,7 +3070,7 @@ class Chewy
   def render_fullscreen_image
     return render_empty_preview(@width, @height) unless @fullscreen_image_path
 
-    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
     hint = dim.render("press any key to go back")
 
     img_h = @height - 2
@@ -2806,11 +3094,11 @@ class Chewy
   end
 
   def render_gallery_view
-    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
-    title_style = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true)
-    sel_style = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true)
-    meta_key = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
-    meta_val = Lipgloss::Style.new.foreground(Theme::TEXT)
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    title_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    sel_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    meta_key = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    meta_val = Lipgloss::Style.new.foreground(Theme.TEXT)
 
     if @gallery_images.empty?
       content = dim.render("No images found in #{@output_dir}")
@@ -2848,7 +3136,7 @@ class Chewy
     counter = dim.render("#{@gallery_index + 1}/#{@gallery_images.length}")
     list_content = list_lines.join("\n") + "\n" + counter
     list_panel = Lipgloss::Style.new
-      .border(:rounded).border_foreground(Theme::PRIMARY)
+      .border(:rounded).border_foreground(Theme.PRIMARY).background(Theme.SURFACE)
       .width(list_w).height(inner_h).padding(0, 1)
       .render(list_content)
 
@@ -2879,7 +3167,7 @@ class Chewy
     thumb ||= dim.render("(no preview)")
     preview_content = thumb + "\n" + info_lines.join("\n")
     preview_panel = Lipgloss::Style.new
-      .border(:rounded).border_foreground(Theme::BORDER_DIM)
+      .border(:rounded).border_foreground(Theme.BORDER_DIM).background(Theme.SURFACE)
       .width(preview_w).height(inner_h).padding(0, 1)
       .render(preview_content)
 
@@ -2891,9 +3179,9 @@ class Chewy
     )
 
     status_text = "enter: fullscreen | ^e: open external | del: delete | j/k: navigate | esc: close"
-    key_style = Lipgloss::Style.new.foreground(Theme::TEXT_DIM).bold(true)
-    desc_style = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED)
-    status = Lipgloss::Style.new.width(@width).padding(0, 1)
+    key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
+    desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+    status = Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE)
       .render(format_help_text(status_text, key_style, desc_style))
 
     Lipgloss.join_vertical(:left, outer, status)
@@ -2913,7 +3201,7 @@ class Chewy
 
   def render_lora_content
     if @available_loras.empty?
-      dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+      dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
       return dim.render("No LoRAs found in #{@lora_dir}")
     end
 
@@ -2922,22 +3210,22 @@ class Chewy
       selected = i == @lora_index
 
       check = if sel
-        Lipgloss::Style.new.foreground(Theme::SUCCESS).render("[x]")
+        Lipgloss::Style.new.foreground(Theme.SUCCESS).render("[x]")
       else
-        Lipgloss::Style.new.foreground(Theme::TEXT_DIM).render("[ ]")
+        Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("[ ]")
       end
 
       weight = if @editing_lora_weight && selected
-        Lipgloss::Style.new.foreground(Theme::ACCENT).render(" w:#{@lora_weight_buffer}_")
+        Lipgloss::Style.new.foreground(Theme.ACCENT).render(" w:#{@lora_weight_buffer}_")
       elsif sel
-        Lipgloss::Style.new.foreground(Theme::ACCENT).render(" w:#{sel[:weight]}")
+        Lipgloss::Style.new.foreground(Theme.ACCENT).render(" w:#{sel[:weight]}")
       else
         ""
       end
 
       if selected
-        cursor = Lipgloss::Style.new.foreground(Theme::ACCENT).bold(true).render("> ")
-        name = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true).render(lora[:name])
+        cursor = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true).render("> ")
+        name = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true).render(lora[:name])
         "#{cursor}#{check} #{name}#{weight}"
       else
         "  #{check} #{lora[:name]}#{weight}"
@@ -2957,17 +3245,17 @@ class Chewy
   def render_preset_content
     all = all_presets
     if all.empty?
-      return Lipgloss::Style.new.foreground(Theme::TEXT_DIM).render("No presets")
+      return Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("No presets")
     end
 
-    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
 
     lines = all.each_with_index.map do |p, i|
       selected = i == @preset_index
       d = p[:data]
       tag = p[:builtin] ?
-        Lipgloss::Style.new.foreground(Theme::TEXT_MUTED).render(" built-in") :
-        Lipgloss::Style.new.foreground(Theme::SUCCESS).render(" custom")
+        Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" built-in") :
+        Lipgloss::Style.new.foreground(Theme.SUCCESS).render(" custom")
 
       desc_parts = [
         "#{d['steps']}steps",
@@ -2977,8 +3265,8 @@ class Chewy
       desc = dim.render(desc_parts.join(" / "))
 
       if selected
-        cursor = Lipgloss::Style.new.foreground(Theme::ACCENT).bold(true).render("> ")
-        name = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true).render(p[:name])
+        cursor = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true).render("> ")
+        name = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true).render(p[:name])
         "#{cursor}#{name}#{tag}\n    #{desc}"
       else
         "  #{p[:name]}#{tag}\n    #{desc}"
@@ -2987,10 +3275,10 @@ class Chewy
 
     result = lines.join("\n")
     if @naming_preset
-      prompt_style = Lipgloss::Style.new.foreground(Theme::ACCENT)
+      prompt_style = Lipgloss::Style.new.foreground(Theme.ACCENT)
       result += "\n\n#{prompt_style.render("Name:")} #{@preset_name_buffer}_"
     elsif @confirm_delete_preset
-      warn_style = Lipgloss::Style.new.foreground(Theme::ERROR).bold(true)
+      warn_style = Lipgloss::Style.new.foreground(Theme.ERROR).bold(true)
       result += "\n\n#{warn_style.render("Delete this preset?")} #{dim.render("y/n")}"
     end
     result
@@ -3004,6 +3292,60 @@ class Chewy
     else
       "enter: load | s: save | d: delete | esc: close"
     end
+  end
+
+  # ========== Theme Picker Overlay ==========
+
+  def handle_theme_key(message)
+    key = message.to_s
+    case key
+    when "esc", "q"
+      # Revert to original theme on cancel
+      Theme.set(@theme_original)
+      return close_overlay
+    when "enter"
+      # Confirm selection
+      save_config
+      @status_message = "Theme: #{Theme.current_name}"
+      return close_overlay
+    when "up", "k"
+      @theme_index = (@theme_index - 1) % THEME_NAMES.length
+      Theme.set(THEME_NAMES[@theme_index])
+      return [self, nil]
+    when "down", "j"
+      @theme_index = (@theme_index + 1) % THEME_NAMES.length
+      Theme.set(THEME_NAMES[@theme_index])
+      return [self, nil]
+    end
+    [self, nil]
+  end
+
+  def render_theme_content
+    lines = THEME_NAMES.each_with_index.map do |name, i|
+      theme = THEMES[name]
+      selected = i == @theme_index
+
+      # Color swatch: show key colors as colored blocks
+      swatch = [
+        theme["primary"], theme["secondary"], theme["accent"],
+        theme["success"], theme["warning"], theme["error"],
+      ].map { |c| Lipgloss::Style.new.foreground(c).render("\u2588\u2588") }.join(" ")
+
+      if selected
+        cursor = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true).render("> ")
+        label = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true).render(name)
+        "#{cursor}#{label}\n    #{swatch}"
+      else
+        dim_label = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render(name)
+        "  #{dim_label}\n    #{swatch}"
+      end
+    end
+
+    lines.join("\n")
+  end
+
+  def render_theme_status
+    "up/down: browse (live preview) | enter: apply | esc: cancel"
   end
 
   # ========== HF Token Overlay ==========
@@ -3040,8 +3382,8 @@ class Chewy
   end
 
   def render_hf_token_content
-    dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
-    accent = Lipgloss::Style.new.foreground(Theme::ACCENT)
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    accent = Lipgloss::Style.new.foreground(Theme.ACCENT)
 
     lines = []
     lines << dim.render("FLUX models require a HuggingFace token to download companion files.")
@@ -3077,6 +3419,15 @@ class Chewy
     when Net::HTTPSuccess then resp
     else raise "HTTP #{resp.code}: #{resp.message}"
     end
+  end
+
+  # Convert Theme.SURFACE hex color to ANSI 24-bit background escape sequence
+  def surface_bg_escape
+    hex = Theme.SURFACE.sub("#", "")
+    r = hex[0, 2].to_i(16)
+    g = hex[2, 2].to_i(16)
+    b = hex[4, 2].to_i(16)
+    "\e[48;2;#{r};#{g};#{b}m"
   end
 
   # ========== Formatting ==========

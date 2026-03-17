@@ -56,6 +56,7 @@ chewy
 | `^u` | Clear init image |
 | `^l` | LoRA selection |
 | `^p` | Presets |
+| `^t` | Theme picker |
 | `^e` | Open last image in viewer |
 | `^f` | Fullscreen image preview |
 | `^x` | Cancel generation |
