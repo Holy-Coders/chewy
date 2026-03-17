@@ -147,4 +147,4 @@ Bump the version in `VERSION` and push to `main`. CI will automatically:
 
 ## License
 
-MIT
+[MIT](LICENSE) - Copyright (c) 2026 Holy Coders
