@@ -89,9 +89,10 @@
       font-size: 18px;
     }
     .nav-logo img {
-      width: 32px;
       height: 32px;
+      width: auto;
       border-radius: 8px;
+      object-fit: contain;
     }
     .nav-links {
       display: flex;
@@ -590,7 +591,7 @@
       font-weight: 600;
       font-size: 14px;
     }
-    footer .brand img { width: 24px; height: 24px; border-radius: 6px; }
+    footer .brand img { height: 24px; width: auto; border-radius: 6px; object-fit: contain; }
     footer .links {
       display: flex;
       gap: 24px;
@@ -661,8 +662,9 @@
       </div>
       <div class="install-bar">
         <code><span class="prompt">$</span> brew install Holy-Coders/chewy/chewy</code>
-        <button onclick="navigator.clipboard.writeText('brew install Holy-Coders/chewy/chewy')" title="Copy">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        <button onclick="copyInstall(this)" title="Copy">
+          <svg class="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          <svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;color:var(--success);"><polyline points="20 6 9 17 4 12"/></svg>
         </button>
       </div>
     </div>
@@ -886,5 +888,18 @@
       <div class="copy">MIT &copy; 2026 Holy Coders</div>
     </div>
   </footer>
+  <script>
+    function copyInstall(btn) {
+      navigator.clipboard.writeText('brew install Holy-Coders/chewy/chewy');
+      var copy = btn.querySelector('.icon-copy');
+      var check = btn.querySelector('.icon-check');
+      copy.style.display = 'none';
+      check.style.display = 'block';
+      setTimeout(function() {
+        check.style.display = 'none';
+        copy.style.display = 'block';
+      }, 1500);
+    }
+  </script>
 </body>
 </html>
