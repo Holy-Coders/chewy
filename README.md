@@ -5,11 +5,11 @@
 <h1 align="center">Chewy</h1>
 
 <p align="center">
-  A terminal UI for local AI image generation with Stable Diffusion and FLUX.
+  A terminal UI for AI image generation with Stable Diffusion, FLUX, DALL-E, Imagen, and more.
 </p>
 
 <p align="center">
-  Built with the <a href="https://github.com/nicholasgasior/ruby-bubbletea">Charm Ruby</a> ecosystem (bubbletea, lipgloss, bubbles) and <a href="https://github.com/leejet/stable-diffusion.cpp">stable-diffusion.cpp</a>.
+  Built with the <a href="https://github.com/nicholasgasior/ruby-bubbletea">Charm Ruby</a> ecosystem (bubbletea, lipgloss, bubbles). Supports local generation via <a href="https://github.com/leejet/stable-diffusion.cpp">stable-diffusion.cpp</a> and 5 cloud providers.
 </p>
 
 ---
@@ -41,14 +41,31 @@ Set `SD_BIN` to point to your `sd` binary if it's not on your PATH.
 chewy
 ```
 
+### Providers
+
+Chewy supports 6 image generation backends. Press `^y` to switch providers.
+
+| Provider | Models | Type |
+|----------|--------|------|
+| **Local (sd.cpp)** | SD 1.x/2.x/3.5, SDXL, FLUX (.gguf/.safetensors/.ckpt) | Local |
+| **OpenAI** | GPT Image 1, DALL-E 3, DALL-E 2 | API |
+| **Fireworks** | FLUX.1 Schnell/Dev/Pro, SDXL, Playground v2.5 | API |
+| **Gemini** | Imagen 3, Imagen 3 Fast, Gemini 2.0 Flash | API |
+| **HuggingFace** | FLUX.1 Schnell/Dev, SDXL, SD 3.5 Large, HiDream | API |
+| **OpenAI-Compatible** | Any model via custom endpoint | API |
+
+API keys are entered in-app (stored securely with chmod 600) or via environment variables (`OPENAI_API_KEY`, `FIREWORKS_API_KEY`, `GEMINI_API_KEY`, `HUGGINGFACE_API_KEY`).
+
 ### Keyboard shortcuts
 
 | Key | Action |
 |-----|--------|
 | `tab` | Cycle focus between prompt, negative prompt, and params |
 | `enter` | Generate image (when in prompt/negative) |
+| `^y` | Switch provider |
 | `^n` | Open model picker |
 | `^d` | Download models from HuggingFace |
+| `^t` | Theme picker (10 themes) |
 | `^a` | Gallery |
 | `^g` | Generation history |
 | `^b` | Browse for init image (img2img) |
@@ -56,7 +73,6 @@ chewy
 | `^u` | Clear init image |
 | `^l` | LoRA selection |
 | `^p` | Presets |
-| `^t` | Theme picker |
 | `^e` | Open last image in viewer |
 | `^f` | Fullscreen image preview |
 | `^x` | Cancel generation |
@@ -71,11 +87,19 @@ Chewy also scans for models from:
 - **DiffusionBee** (`~/.diffusionbee`)
 - **Draw Things** (`~/Library/Containers/com.liuliu.draw-things/Data/Documents/Models`)
 
-Press `^d` inside chewy to browse and download models directly from HuggingFace.
+Press `^d` inside chewy to browse recommended starter models or search HuggingFace directly. Curated picks include SD 1.5, SD 3.5 Medium, SDXL Turbo, DreamShaper, and FLUX.1 Schnell.
 
 ### FLUX models
 
 FLUX models require companion files (clip_l, t5xxl, vae). Chewy will automatically download these when you first try to generate with a FLUX model. You'll need a [HuggingFace token](https://huggingface.co/settings/tokens) with read access.
+
+### Themes
+
+10 built-in color themes: Midnight (default), Dracula, Catppuccin, Tokyo Night, Gruvbox, Nord, Rose Pine, Solarized, Horizon, and Light. Press `^t` to switch. An animated pixel-art splash screen greets you on startup.
+
+### Samplers & Schedulers
+
+14 samplers (euler, euler_a, heun, dpm2, dpm++2s_a, dpm++2m, dpm++2mv2, ipndm, ipndm_v, lcm, ddim_trailing, tcd, res_multistep, res_2s) and 9 schedulers (discrete, karras, exponential, ays, gits, sgm_uniform, simple, smoothstep, kl_optimal). Configurable thread count for local generation.
 
 ### img2img
 
