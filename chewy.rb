@@ -161,6 +161,11 @@ class ClipboardPasteMessage < Bubbletea::Message
   def initialize(path: nil, error: nil) @path = path; @error = error end
 end
 
+class ModelValidatedMessage < Bubbletea::Message
+  attr_reader :path, :model_type, :error
+  def initialize(path:, model_type: nil, error: nil) @path = path; @model_type = model_type; @error = error end
+end
+
 # ---------- Main App ----------
 
 class Chewy
@@ -186,6 +191,8 @@ class Chewy
     @model_paths = []
     @pinned_models = @config["pinned_models"] || []
     @recent_models = @config["recent_models"] || []
+    @incompatible_models = @config["incompatible_models"] || []
+    @model_types = @config["model_types"] || {}  # path => "SD 1.x", "SDXL", "Flux", etc.
 
     # Prompt + Negative
     @prompt_input = Bubbles::TextInput.new
@@ -318,6 +325,11 @@ class Chewy
     @companion_downloading = false
     @companion_remaining = 0
     @companion_errors = []
+    @companion_current_file = ""
+    @companion_dest = nil
+    @companion_download_size = 0
+    @companion_queue = []
+    @companion_hf_token = nil
   end
 
   # ========== Config ==========
@@ -343,6 +355,9 @@ class Chewy
       "default_sampler" => @sampler || "euler_a",
       "pinned_models" => @pinned_models || [],
       "recent_models" => @recent_models || [],
+      "last_model" => @selected_model_path,
+      "incompatible_models" => @incompatible_models || [],
+      "model_types" => @model_types || {},
     }
     File.write(CONFIG_PATH, YAML.dump(data))
   rescue
@@ -423,23 +438,13 @@ class Chewy
       [self, nil]
     when CompanionDownloadDoneMessage
       @companion_remaining -= 1
-      if @companion_remaining <= 0
-        @companion_downloading = false
-        if @companion_errors.empty?
-          @status_message = "FLUX companion files ready"
-        else
-          @error_message = "Some downloads failed: #{@companion_errors.join(', ')}"
-        end
-      end
-      [self, nil]
+      # Start next companion download (sequential with progress)
+      return start_next_companion_download(@companion_queue || [], @companion_hf_token)
     when CompanionDownloadErrorMessage
       @companion_remaining -= 1
       @companion_errors << "#{message.name}: #{message.error}"
-      if @companion_remaining <= 0
-        @companion_downloading = false
-        @error_message = "Download failed: #{@companion_errors.join(', ')}"
-      end
-      [self, nil]
+      # Continue with next even if one failed
+      return start_next_companion_download(@companion_queue || [], @companion_hf_token)
     when ClipboardPasteMessage
       if message.error
         @error_message = message.error
@@ -448,6 +453,8 @@ class Chewy
         @status_message = "Pasted image: #{File.basename(message.path)}"
       end
       [self, nil]
+    when ModelValidatedMessage
+      handle_model_validated(message)
     when Bubbletea::KeyMessage
       handle_key(message)
     else
@@ -487,6 +494,8 @@ class Chewy
     files = dirs.flat_map { |d| Dir.glob(File.join(d, "**", ext_glob)) }
       .uniq
       .reject { |f| companion_names.include?(File.basename(f)) }
+      .reject { |f| File.size(f) < 100_000_000 }        # too small to be a diffusion model
+      .reject { |f| @incompatible_models.include?(f) }   # previously failed validation
 
     # Sort: pinned first, recent second, rest alphabetical
     pinned = files.select { |f| @pinned_models.include?(f) }
@@ -505,7 +514,8 @@ class Chewy
         ext = File.extname(f).delete(".").upcase
         prefix = @pinned_models.include?(f) ? "* " : "  "
         source = model_source_tag(f)
-        { title: "#{prefix}#{name}", description: "#{ext}#{source}" }
+        type_tag = model_type_tag(f)
+        { title: "#{prefix}#{name}", description: "#{ext}#{type_tag}#{source}" }
       end
     end
 
@@ -515,7 +525,35 @@ class Chewy
     @model_list.selected_item_style = Lipgloss::Style.new.foreground(Theme::PRIMARY).bold(true)
     @model_list.item_style = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
 
-    @selected_model_path = sorted.first if sorted.any?
+    if sorted.any?
+      last = @config["last_model"]
+      @selected_model_path = if last && sorted.include?(last)
+        last
+      else
+        sorted.first
+      end
+    end
+  end
+
+  def model_type_tag(path)
+    # Use cached type from previous validation if available
+    if @model_types[path]
+      return " | #{@model_types[path]}"
+    end
+    # Guess from filename
+    name = File.basename(path).downcase
+    type = if name.include?("flux")
+      "FLUX"
+    elsif name.include?("sdxl") || name.include?("sd_xl")
+      "SDXL"
+    elsif name.include?("sd3")
+      "SD3"
+    elsif name.include?("sd15") || name.include?("sd1.") || name.include?("sd_1") || name.include?("v1-")
+      "SD 1.x"
+    elsif name.include?("sd2") || name.include?("v2-")
+      "SD 2.x"
+    end
+    type ? " | #{type}" : ""
   end
 
   def model_source_tag(path)
@@ -526,6 +564,76 @@ class Chewy
     else
       ""
     end
+  end
+
+  def validate_model_cmd(path)
+    sd_bin = @sd_bin
+    Proc.new do
+      # Run sd with 1 step at tiny resolution; kill early once we detect the version line
+      args = [sd_bin, "-m", path, "-p", "test", "--steps", "1", "-W", "64", "-H", "64", "-o", "/dev/null"]
+      r, _w, pid = PTY.spawn(*args)
+      output = +""
+      type = nil; failed = false
+      begin
+        loop do
+          chunk = r.readpartial(4096)
+          output << chunk
+          # Check for version detection
+          if output.include?("Version:")
+            type = if output.include?("Version: Flux")
+              "FLUX"
+            elsif output.include?("Version: SDXL")
+              "SDXL"
+            elsif output.include?("Version: SD 3")
+              "SD3"
+            elsif output.include?("Version: SD 2")
+              "SD 2.x"
+            elsif output.include?("Version: SD 1")
+              "SD 1.x"
+            end
+            Process.kill("TERM", pid) rescue nil
+            break
+          end
+          if output.include?("get sd version from file failed") || output.include?("new_sd_ctx_t failed")
+            failed = true
+            break
+          end
+        end
+      rescue Errno::EIO, EOFError
+        # Process ended
+        failed = true if output.include?("get sd version from file failed") || output.include?("new_sd_ctx_t failed")
+      end
+      r.close rescue nil
+      Process.wait(pid) rescue nil
+
+      if failed
+        ModelValidatedMessage.new(path: path, error: "incompatible")
+      else
+        ModelValidatedMessage.new(path: path, model_type: type)
+      end
+    rescue => e
+      ModelValidatedMessage.new(path: path, error: e.message)
+    end
+  end
+
+  def handle_model_validated(message)
+    if message.error == "incompatible"
+      @incompatible_models << message.path unless @incompatible_models.include?(message.path)
+      @model_types.delete(message.path)
+      # If this was the selected model, deselect and refresh
+      if @selected_model_path == message.path
+        name = File.basename(message.path)
+        @error_message = "\"#{name}\" is not a supported diffusion model — removed from list"
+        @selected_model_path = nil
+      end
+      save_config
+      scan_models
+    elsif message.model_type
+      @model_types[message.path] = message.model_type
+      save_config
+      scan_models  # refresh list to show detected type
+    end
+    [self, nil]
   end
 
   def scan_loras
@@ -640,7 +748,10 @@ class Chewy
     when "ctrl+r" then @params[:seed] = -1; return [self, nil]
     when "ctrl+b" then return open_file_picker                  # b = browse init image
     when "ctrl+v" then return paste_image_from_clipboard        # v = paste image
-    when "ctrl+u" then @init_image_path = nil; @status_message = "Init image cleared"; return [self, nil]
+    when "ctrl+u"
+      unless @focus == FOCUS_PROMPT || @focus == FOCUS_NEGATIVE
+        @init_image_path = nil; @status_message = "Init image cleared"; return [self, nil]
+      end
     when "ctrl+x" then if @generating && @gen_pid; @gen_cancelled = true; Process.kill("TERM", @gen_pid) rescue nil; end; return [self, nil]
     when "tab"    then cycle_focus; return [self, nil]
     when "shift+tab" then cycle_focus(reverse: true); return [self, nil]
@@ -845,30 +956,61 @@ class Chewy
     @companion_downloading = true
     @companion_remaining = missing.size
     @companion_errors = []
-    @status_message = "Downloading #{missing.size} FLUX companion file(s)..."
+    @companion_current_file = ""
+    @companion_dest = nil
 
-    cmds = missing.map do |name, info|
-      dest = File.join(@models_dir, info[:filename])
-      part = "#{dest}.part"
-      url = info[:url]
-      Proc.new do
-        curl_args = ["curl", "-fL", "-o", part, "-sS",
-                     "-H", "Authorization: Bearer #{hf_token}", url]
-        _out, err, st = Open3.capture3(*curl_args)
-        if st.success?
-          File.rename(part, dest)
-          CompanionDownloadDoneMessage.new(name: name)
-        else
-          File.delete(part) if File.exist?(part)
-          CompanionDownloadErrorMessage.new(name: name, error: "curl failed: #{err.strip}")
-        end
-      rescue => e
-        File.delete(part) rescue nil
-        CompanionDownloadErrorMessage.new(name: name, error: e.message)
+    # Download sequentially so we can show progress for each file
+    queue = missing.to_a  # [[name, info], ...]
+    start_next_companion_download(queue, hf_token)
+  end
+
+  def start_next_companion_download(queue, hf_token)
+    if queue.empty?
+      @companion_downloading = false
+      @companion_current_file = ""
+      @companion_dest = nil
+      if @companion_errors.empty?
+        @status_message = "FLUX companion files ready"
+      else
+        @error_message = "Some downloads failed: #{@companion_errors.join(', ')}"
       end
+      return [self, nil]
     end
 
-    [self, Bubbletea::BatchCommand.new(cmds)]
+    name, info = queue.first
+    remaining = queue[1..]
+    dest = File.join(@models_dir, info[:filename])
+    part = "#{dest}.part"
+    url = info[:url]
+
+    @companion_current_file = info[:filename]
+    @companion_dest = part
+    @companion_download_size = 0
+
+    cmd = Proc.new do
+      # First get file size via HEAD request
+      size_out, _ = Open3.capture2("curl", "-sI", "-L", url, "-H", "Authorization: Bearer #{hf_token}")
+      content_length = size_out[/content-length:\s*(\d+)/i, 1]&.to_i || 0
+      @companion_download_size = content_length
+
+      curl_args = ["curl", "-fL", "-o", part, "-sS",
+                   "-H", "Authorization: Bearer #{hf_token}", url]
+      _out, err, st = Open3.capture3(*curl_args)
+      if st.success?
+        File.rename(part, dest)
+        CompanionDownloadDoneMessage.new(name: name)
+      else
+        File.delete(part) if File.exist?(part)
+        CompanionDownloadErrorMessage.new(name: name, error: "curl failed: #{err.strip}")
+      end
+    rescue => e
+      File.delete(part) rescue nil
+      CompanionDownloadErrorMessage.new(name: name, error: e.message)
+    end
+
+    @companion_queue = remaining
+    @companion_hf_token = hf_token
+    [self, cmd]
   end
 
   # ========== Generation ==========
@@ -893,7 +1035,7 @@ class Chewy
     @generating = true
     @gen_cancelled = false
     @gen_step = 0; @gen_total_steps = 0; @gen_status = "Starting..."
-    @gen_start_time = Time.now; @gen_sampling_start = nil
+    @gen_start_time = Time.now; @gen_sampling_start = nil; @gen_secs_per_step = nil
     @reveal_phase = nil; @reveal_path = nil  # cancel any in-progress reveal
     @gen_current_batch = 0
     @gen_total_batch = @params[:batch]
@@ -1050,8 +1192,11 @@ class Chewy
           else
             exit_code = status&.exitstatus || "unknown"
             last_line = all_output.lines.last&.strip || "unknown"
-            hint = if all_output.include?("new_sd_ctx_t failed")
-              "Model may not support this operation — try a different model"
+            hint = if all_output.include?("get sd version from file failed") || all_output.include?("new_sd_ctx_t failed")
+              name = File.basename(model)
+              "\"#{name}\" is not a supported diffusion model — try a different model"
+            elsif all_output.include?("out of memory") || all_output.include?("GGML_ASSERT")
+              "Not enough memory for this model — try a smaller/quantized version"
             end
             msg = hint || "Failed (exit #{exit_code}): #{last_line}"
             error_result = GenerationErrorMessage.new(
@@ -1142,8 +1287,15 @@ class Chewy
         @gen_step = 0; @gen_total_steps = 0
         @gen_sampling_start = Time.now
       end
-      if sampling_started && seg =~ /(\d+)\s*\/\s*(\d+)\s*-\s*[\d.]+\s*(?:s\/it|it\/s)/
+      if sampling_started && seg =~ /(\d+)\s*\/\s*(\d+)\s*-\s*([\d.]+)\s*(s\/it|it\/s)/
         @gen_step = $1.to_i; @gen_total_steps = $2.to_i
+        # Use sd.cpp's own speed measurement for accurate ETA
+        speed_val = $3.to_f
+        @gen_secs_per_step = if $4 == "s/it"
+          speed_val
+        else
+          speed_val > 0 ? 1.0 / speed_val : 0
+        end
       end
     end
     yield new_buf, sampling_started, parsed_seed
@@ -1257,6 +1409,8 @@ class Chewy
 
   def handle_repos_fetched(message)
     @fetching = false; @remote_repos = message.repos
+    @download_search_input.blur
+    @download_search_focused = false
     items = @remote_repos.map do |r|
       { title: r["id"], description: "#{format_number(r["downloads"] || 0)} downloads" }
     end
@@ -1317,6 +1471,7 @@ class Chewy
     @model_downloading = false; @download_dest = nil; @download_filename = ""
     @status_message = "Downloaded #{message.filename}"; @error_message = nil
     scan_models
+    @overlay = :models
     [self, nil]
   end
 
@@ -1353,6 +1508,13 @@ class Chewy
       if @model_paths&.any? && idx < @model_paths.length
         @selected_model_path = @model_paths[idx]
         @preview_cache = nil # invalidate preview when model changes
+        save_config
+        # Validate model in background if we don't know its type yet
+        unless @model_types[@selected_model_path]
+          validate_cmd = validate_model_cmd(@selected_model_path)
+          close_overlay
+          return [self, validate_cmd]
+        end
       end
       return close_overlay
     when "f"
@@ -1947,6 +2109,18 @@ class Chewy
 
   # ========== Image Rendering ==========
 
+  # Center a rendered image (with ANSI escape codes) horizontally within a given width
+  def center_image(img_str, target_width)
+    return img_str unless img_str
+    lines = img_str.split("\n")
+    return img_str if lines.empty?
+    # Measure visible width of first line (strip ANSI escapes)
+    visible_width = lines.first.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
+    pad = [(target_width - visible_width) / 2, 0].max
+    padding = " " * pad
+    lines.map { |l| "#{padding}#{l}" }.join("\n")
+  end
+
   def render_image_halfblocks(path, max_w, max_h, pixelate: nil)
     return nil unless path && File.exist?(path)
 
@@ -2076,14 +2250,17 @@ class Chewy
     model_info = if @selected_model_path
       name = File.basename(@selected_model_path, File.extname(@selected_model_path))
       is_flux = flux_model?(@selected_model_path)
-      type_badge = if is_flux
+      cached_type = @model_types[@selected_model_path]
+      type_label = if is_flux || cached_type == "FLUX"
         ok = flux_companions_present?
         s = Lipgloss::Style.new.foreground(ok ? Theme::SUCCESS : Theme::WARNING).bold(true)
         " #{s.render(ok ? 'FLUX' : 'FLUX!')}"
+      elsif cached_type
+        " #{dim.render(cached_type)}"
       else
         " #{dim.render('SD')}"
       end
-      " #{dim.render('|')} #{Lipgloss::Style.new.foreground(Theme::TEXT).render(name)}#{type_badge}"
+      " #{dim.render('|')} #{Lipgloss::Style.new.foreground(Theme::TEXT).render(name)}#{type_label}"
     else
       " #{dim.render('| no model selected')}"
     end
@@ -2169,10 +2346,12 @@ class Chewy
 
     img_str = render_image(@last_output_path, max_w, max_h - 2, pixelate: pixelate)
     if img_str
+      centered_img = center_image(img_str, max_w)
       dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
-      info = "#{File.basename(@last_output_path)}  #{dim.render("| ^e to open | #{@last_generation_time}s")}"
+      info = "#{File.basename(@last_output_path)}  #{dim.render("| ^e open | #{@last_generation_time}s")}"
       seed_info = @last_seed ? "  #{dim.render("| seed #{@last_seed}")}" : ""
-      result = "#{img_str}\n#{info}#{seed_info}"
+      info_line = Lipgloss::Style.new.width(max_w).align(:center).render("#{info}#{seed_info}")
+      result = "#{centered_img}\n#{info_line}"
       # Only cache at full resolution
       if @reveal_phase.nil?
         @preview_cache = result
@@ -2187,47 +2366,62 @@ class Chewy
   def render_generating_preview(max_w, max_h)
     accent = Lipgloss::Style.new.foreground(Theme::ACCENT).bold(true)
     dim = Lipgloss::Style.new.foreground(Theme::TEXT_DIM)
+    center = ->(s) { Lipgloss::Style.new.width(max_w).align(:center).render(s) }
 
     @gen_start_time ||= Time.now
     elapsed = (Time.now - @gen_start_time).to_i
     elapsed_str = elapsed >= 60 ? "#{elapsed / 60}m#{elapsed % 60}s" : "#{elapsed}s"
 
-    # Build status lines
+    # Build status lines (centered)
     status_lines = []
-    status_lines << "#{@spinner.view} #{accent.render("Generating...")}  #{dim.render(elapsed_str)}"
 
     if @gen_total_steps > 0 && @gen_step > 0
       pct = @gen_step.to_f / @gen_total_steps
       bar = @progress.view_as(pct)
       remaining = @gen_total_steps - @gen_step
-      eta_str = if @gen_sampling_start && @gen_step > 0
-        secs_per_step = (Time.now - @gen_sampling_start) / @gen_step
-        eta_secs = (remaining * secs_per_step).to_i
-        eta_secs >= 60 ? "~#{eta_secs / 60}m#{eta_secs % 60}s left" : "~#{eta_secs}s left"
+      eta_str = if @gen_secs_per_step && @gen_secs_per_step > 0
+        eta_secs = (remaining * @gen_secs_per_step).to_i
+        eta_secs >= 60 ? "~#{eta_secs / 60}m#{eta_secs % 60}s" : "~#{eta_secs}s"
       else
         ""
       end
-      status_lines << "#{bar} #{dim.render("#{@gen_step}/#{@gen_total_steps}")}  #{dim.render(eta_str)}"
+      speed_str = if @gen_secs_per_step && @gen_secs_per_step > 0
+        @gen_secs_per_step >= 1.0 ? "#{@gen_secs_per_step.round(1)}s/it" : "#{(1.0 / @gen_secs_per_step).round(1)}it/s"
+      else
+        ""
+      end
+      # Generating + progress inline
+      status_lines << center.call("#{@spinner.view} #{accent.render("Generating")} #{dim.render(elapsed_str)}")
+      status_lines << ""
+      status_lines << center.call(bar)
+      detail = [
+        "#{@gen_step}/#{@gen_total_steps}",
+        speed_str,
+        eta_str,
+      ].reject(&:empty?).join("  ")
+      status_lines << center.call(dim.render(detail))
     else
-      status_lines << dim.render(@gen_status || "Starting...")
+      status_lines << center.call("#{@spinner.view} #{accent.render("Generating")} #{dim.render(elapsed_str)}")
+      status_lines << ""
+      status_lines << center.call(dim.render(@gen_status || "Starting..."))
     end
 
     if @gen_total_batch > 1
-      status_lines << dim.render("Batch #{@gen_current_batch}/#{@gen_total_batch}")
+      status_lines << center.call(dim.render("Batch #{@gen_current_batch}/#{@gen_total_batch}"))
     end
-    status_lines << dim.render("^x to cancel")
+    status_lines << ""
+    status_lines << center.call(dim.render("^x cancel"))
 
     # Try to show live preview image
     preview_img = load_gen_preview(max_w, max_h - status_lines.length - 1)
 
     if preview_img
-      # Image on top, status below
-      (preview_img + "\n" + status_lines.join("\n"))
+      centered_img = center_image(preview_img, max_w)
+      (centered_img + "\n" + status_lines.join("\n"))
     else
       # No preview yet — center status vertically
-      lines = [""] + status_lines
-      pad_top = [(max_h - lines.length) / 2, 0].max
-      (Array.new(pad_top, "") + lines).join("\n")
+      pad_top = [(max_h - status_lines.length) / 2, 0].max
+      (Array.new(pad_top, "") + status_lines).join("\n")
     end
   end
 
@@ -2257,6 +2451,7 @@ class Chewy
 
   def render_empty_preview(max_w, max_h)
     dim = Lipgloss::Style.new.foreground(Theme::TEXT_MUTED)
+    center = ->(s) { Lipgloss::Style.new.width(max_w).align(:center).render(s) }
 
     # Show logo in empty preview area
     logo_path = File.join(__dir__, "logo.jpeg")
@@ -2266,12 +2461,12 @@ class Chewy
     end
 
     if logo_img
-      logo_lines = logo_img.split("\n")
-      lines = logo_lines + ["", dim.render("Press enter to generate")]
+      centered_logo = center_image(logo_img, max_w)
+      lines = centered_logo.split("\n") + ["", center.call(dim.render("Press enter to generate"))]
       pad_top = [(max_h - lines.length) / 2, 0].max
       (Array.new(pad_top, "") + lines).join("\n")
     else
-      lines = [dim.render("No image yet"), "", dim.render("Press enter to generate")]
+      lines = [center.call(dim.render("No image yet")), "", center.call(dim.render("Press enter to generate"))]
       pad_top = [(max_h - lines.length) / 2, 0].max
       (Array.new(pad_top, "") + lines).join("\n")
     end
@@ -2380,8 +2575,15 @@ class Chewy
     end
 
     if @companion_downloading
-      bar = Lipgloss::Style.new.background(Theme::SECONDARY).foreground(Theme::TEXT).width(@width).padding(0, 1)
-      return bar.render("#{@spinner.view} Downloading FLUX companion files (#{@companion_remaining} remaining)...")
+      bar_style = Lipgloss::Style.new.background(Theme::SECONDARY).foreground(Theme::TEXT).width(@width).padding(0, 1)
+      current = (@companion_dest && File.exist?(@companion_dest)) ? File.size(@companion_dest) : 0
+      total = @companion_download_size || 0
+      pct = total > 0 ? (current.to_f / total) : 0
+      progress_bar = @progress.view_as(pct.clamp(0.0, 1.0))
+      size_text = total > 0 ?
+        "#{format_bytes(current)} / #{format_bytes(total)}" :
+        format_bytes(current)
+      return bar_style.render("#{@spinner.view} #{@companion_current_file} #{progress_bar} #{size_text} (#{@companion_remaining} remaining)")
     end
 
     if @status_message
