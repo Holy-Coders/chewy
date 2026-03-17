@@ -977,8 +977,9 @@ class HuggingFaceInferenceProvider < Provider::Base
     unless resp.is_a?(Net::HTTPSuccess)
       error_body = JSON.parse(resp.body) rescue {}
       error_msg = error_body["error"] || "HTTP #{resp.code}: #{resp.message}"
-      # Model loading hint
-      if resp.code == "503"
+      if resp.code == "401"
+        error_msg = "Token invalid or missing inference permission — create a new token at huggingface.co/settings/tokens with 'Make calls to Inference Providers' enabled"
+      elsif resp.code == "503"
         error_msg = "Model is loading, try again in a moment"
       end
       return Provider::GenerationResult.new(error: "HuggingFace: #{error_msg}")
@@ -1403,11 +1404,10 @@ class Chewy
 
     # API key input (for remote providers)
     @api_key_input = Bubbles::TextInput.new
-    @api_key_input.placeholder = "sk-..."
+    @api_key_input.placeholder = "Paste your API key..."
     @api_key_input.prompt = ""
     @api_key_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
     @api_key_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
-    @api_key_input.echo_mode = :password
 
     # Image preview cache
     @preview_cache = nil
@@ -4584,7 +4584,7 @@ class Chewy
     case key
     when "esc", "q"
       return close_overlay
-    when "up", "k"
+    when "up"
       @provider_index = (@provider_index - 1) % @providers.length
       return [self, nil]
     when "down", "j"
@@ -4610,7 +4610,7 @@ class Chewy
         update_param_keys if selected.id == @provider.id
       end
       return [self, nil]
-    when "k"
+    when "k", "s"
       selected = @providers[@provider_index]
       if selected.needs_api_key?
         @provider = selected  # set so the api_key overlay knows which provider
@@ -4647,7 +4647,7 @@ class Chewy
         if prov.api_key_set?
           Lipgloss::Style.new.foreground(Theme.SUCCESS).render(" \u2713")
         else
-          hint = selected ? " \u2014 press k to set key" : ""
+          hint = selected ? " \u2014 press s to set key" : ""
           Lipgloss::Style.new.foreground(Theme.ERROR).render(" \u2717 no key#{hint}")
         end
       else
@@ -4684,7 +4684,7 @@ class Chewy
   end
 
   def render_provider_status
-    "up/down: select | left/right: model | k: set key | enter: activate | esc: close"
+    "up/down: select | left/right: model | s: set key | enter: activate | esc: close"
   end
 
   # ========== API Key Overlay ==========
