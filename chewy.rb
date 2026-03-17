@@ -13,6 +13,7 @@ require "yaml"
 require "chunky_png"
 require "pty"
 require "base64"
+require "etc"
 
 # ---------- Constants ----------
 
@@ -28,17 +29,18 @@ EXTRA_MODEL_DIRS = [
   File.expand_path("~/.diffusionbee"),
   File.expand_path("~/Library/Containers/com.liuliu.draw-things/Data/Documents/Models"),
 ].freeze
-SAMPLER_OPTIONS = %w[euler euler_a dpm2 dpm2_a dpm++2s_a dpm++2m dpm++2mv2 lcm].freeze
+SAMPLER_OPTIONS = %w[euler euler_a heun dpm2 dpm++2s_a dpm++2m dpm++2mv2 ipndm ipndm_v lcm ddim_trailing tcd res_multistep res_2s].freeze
+SCHEDULER_OPTIONS = %w[discrete karras exponential ays gits sgm_uniform simple smoothstep kl_optimal].freeze
 CONFIG_DIR = File.expand_path("~/.config/sdtui")
 CONFIG_PATH = File.join(CONFIG_DIR, "config.yml")
 PRESETS_PATH = File.join(CONFIG_DIR, "presets.yml")
 
 BUILTIN_PRESETS = {
-  "fast" => { "steps" => 10, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler" },
-  "quality" => { "steps" => 30, "cfg_scale" => 7.0, "width" => 768, "height" => 768, "sampler" => "dpm++2m" },
-  "portrait" => { "steps" => 20, "cfg_scale" => 7.0, "width" => 512, "height" => 768, "sampler" => "euler_a" },
-  "flux-fast" => { "steps" => 4, "cfg_scale" => 1.0, "width" => 512, "height" => 512, "sampler" => "euler" },
-  "flux-quality" => { "steps" => 8, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler" },
+  "fast" => { "steps" => 10, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "ays" },
+  "quality" => { "steps" => 30, "cfg_scale" => 7.0, "width" => 768, "height" => 768, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  "portrait" => { "steps" => 20, "cfg_scale" => 7.0, "width" => 512, "height" => 768, "sampler" => "euler_a", "scheduler" => "karras" },
+  "flux-fast" => { "steps" => 4, "cfg_scale" => 1.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "simple" },
+  "flux-quality" => { "steps" => 8, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple" },
 }.freeze
 
 # FLUX companion files needed alongside the diffusion model
@@ -61,35 +63,35 @@ FLUX_COMPANION_FILES = {
 PRELOADED_MODELS = [
   {
     name: "Stable Diffusion 1.5 (Q8)",
-    repo: "second-state/stable-diffusion-v-1-5-GGUF",
-    file: "stable-diffusion-v1-5-Q8_0.gguf",
-    size: 2_132_887_808,
+    repo: "second-state/stable-diffusion-v1-5-GGUF",
+    file: "stable-diffusion-v1-5-pruned-emaonly-Q8_0.gguf",
+    size: 1_640_000_000,
     type: "SD 1.5",
     desc: "Classic SD 1.5 — fast, low VRAM, great for learning",
   },
   {
     name: "Stable Diffusion 3.5 Medium (Q5)",
-    repo: "stduhpf/SD3.5-Medium-GGUF",
-    file: "sd3.5_medium-Q5_K_S.gguf",
-    size: 3_046_699_072,
+    repo: "second-state/stable-diffusion-3.5-medium-GGUF",
+    file: "sd3.5_medium-Q5_0.gguf",
+    size: 2_200_000_000,
     type: "SD 3.5",
     desc: "Newest SD architecture — excellent quality/speed balance",
   },
   {
-    name: "SDXL Turbo (Q5)",
-    repo: "stduhpf/SDXL-Turbo-Q5_0-GGUF",
-    file: "sdxl-turbo-Q5_0.gguf",
-    size: 4_630_000_000,
+    name: "SDXL Turbo (Q4)",
+    repo: "gpustack/stable-diffusion-xl-1.0-turbo-GGUF",
+    file: "stable-diffusion-xl-1.0-turbo-Q4_0.gguf",
+    size: 3_670_000_000,
     type: "SDXL",
     desc: "Fast SDXL variant — 1-4 steps, real-time generation",
   },
   {
-    name: "DreamShaper XL Turbo (Q6)",
-    repo: "second-state/DreamShaper-XL-Turbo-v2.1-GGUF",
-    file: "DreamShaperXL_Turbo_v2.1-Q6_K.gguf",
-    size: 5_455_000_000,
-    type: "SDXL",
-    desc: "High-quality artistic SDXL model — 6-8 steps",
+    name: "DreamShaper v7 LCM (F16)",
+    repo: "Steward/lcm-dreamshaper-v7-gguf",
+    file: "LCM_Dreamshaper_v7-f16.gguf",
+    size: 1_990_000_000,
+    type: "SD 1.5",
+    desc: "DreamShaper with LCM — 4-8 steps, artistic style",
   },
   {
     name: "FLUX.1 Schnell (Q4)",
@@ -166,6 +168,13 @@ THEMES = {
     "text" => "#2D3436", "text_dim" => "#636E72", "text_muted" => "#95A5A6",
     "surface" => "#F5F5F5", "border_dim" => "#DFE6E9", "border_focus" => "#6C5CE7",
     "bar_text" => "#FFFFFF",
+  },
+  "horizon" => {
+    "primary" => "#FC4777", "secondary" => "#FF58B1", "accent" => "#FFA27B",
+    "success" => "#00CE81", "warning" => "#FFA27B", "error" => "#FC4777",
+    "text" => "#16161D", "text_dim" => "#6A5B58", "text_muted" => "#9B8C89",
+    "surface" => "#FDF0ED", "border_dim" => "#F0D8D2", "border_focus" => "#FC4777",
+    "bar_text" => "#FDF0ED",
   },
 }.freeze
 
@@ -347,10 +356,13 @@ class Chewy
     dc = (@config["default_cfg"] || 7.0).to_f
     dw = @config["default_width"] || 512
     dh = @config["default_height"] || 512
-    @params = { steps: ds, cfg_scale: dc, width: dw, height: dh, seed: -1, batch: 1, strength: 0.75 }
+    @params = { steps: ds, cfg_scale: dc, width: dw, height: dh, seed: -1, batch: 1, strength: 0.75,
+                 threads: @config["default_threads"] || Etc.nprocessors }
     @sampler = @config["default_sampler"] || "euler_a"
     @sampler_index = SAMPLER_OPTIONS.index(@sampler) || 1
-    @param_display_keys = %i[steps cfg_scale width height seed sampler batch strength]
+    @scheduler = @config["default_scheduler"] || "discrete"
+    @scheduler_index = SCHEDULER_OPTIONS.index(@scheduler) || 0
+    @param_display_keys = %i[steps cfg_scale width height seed sampler scheduler batch strength threads]
     @param_index = 0
     @editing_param = false
     @param_edit_buffer = ""
@@ -490,6 +502,8 @@ class Chewy
       "default_width" => @params&.dig(:width) || 512,
       "default_height" => @params&.dig(:height) || 512,
       "default_sampler" => @sampler || "euler_a",
+      "default_scheduler" => @scheduler || "discrete",
+      "default_threads" => @params&.dig(:threads) || Etc.nprocessors,
       "pinned_models" => @pinned_models || [],
       "recent_models" => @recent_models || [],
       "last_model" => @selected_model_path,
@@ -497,6 +511,7 @@ class Chewy
       "model_types" => @model_types || {},
       "theme" => Theme.current_name,
     }
+    @config = data
     File.write(CONFIG_PATH, YAML.dump(data))
   rescue
     nil
@@ -609,6 +624,11 @@ class Chewy
   def view
     apply_theme_styles
 
+    # Shrink dimensions for padding: 2 chars left/right, 1 line top/bottom
+    saved_w = @width; saved_h = @height
+    @width = @width - 4
+    @height = @height - 2
+
     content = if @splash
       render_splash
     else
@@ -627,8 +647,10 @@ class Chewy
       end
     end
 
-    # Fill entire terminal with theme surface background
-    output = Lipgloss::Style.new.background(Theme.SURFACE).width(@width).height(@height).render(content)
+    @width = saved_w; @height = saved_h
+
+    # Fill entire terminal with theme surface background, with inner padding
+    output = Lipgloss::Style.new.background(Theme.SURFACE).width(@width).height(@height).padding(1, 2).render(content)
 
     # Every inner style emits \e[0m (SGR reset), which clears background back to
     # the terminal default. Re-apply the surface background after every reset so
@@ -678,7 +700,6 @@ class Chewy
       .uniq
       .reject { |f| companion_names.include?(File.basename(f)) }
       .reject { |f| File.size(f) < 100_000_000 }        # too small to be a diffusion model
-      .reject { |f| @incompatible_models.include?(f) }   # previously failed validation
 
     # Sort: pinned first, recent second, rest alphabetical
     pinned = files.select { |f| @pinned_models.include?(f) }
@@ -709,12 +730,15 @@ class Chewy
     @model_list.item_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
 
     if sorted.any?
-      last = @config["last_model"]
-      @selected_model_path = if last && sorted.include?(last)
-        last
+      preferred = if @selected_model_path && sorted.include?(@selected_model_path)
+        @selected_model_path
       else
-        sorted.first
+        last = @config["last_model"]
+        last if last && sorted.include?(last)
       end
+
+      @selected_model_path = preferred || sorted.first
+      @model_list.select(sorted.index(@selected_model_path) || 0)
     end
   end
 
@@ -756,7 +780,7 @@ class Chewy
       args = [sd_bin, "-m", path, "-p", "test", "--steps", "1", "-W", "64", "-H", "64", "-o", "/dev/null"]
       r, _w, pid = PTY.spawn(*args)
       output = +""
-      type = nil; failed = false
+      type = nil
       begin
         loop do
           chunk = r.readpartial(4096)
@@ -777,41 +801,21 @@ class Chewy
             Process.kill("TERM", pid) rescue nil
             break
           end
-          if output.include?("get sd version from file failed") || output.include?("new_sd_ctx_t failed")
-            failed = true
-            break
-          end
         end
       rescue Errno::EIO, EOFError
-        # Process ended
-        failed = true if output.include?("get sd version from file failed") || output.include?("new_sd_ctx_t failed")
+        # Process ended before printing a detectable version line.
       end
       r.close rescue nil
       Process.wait(pid) rescue nil
 
-      if failed
-        ModelValidatedMessage.new(path: path, error: "incompatible")
-      else
-        ModelValidatedMessage.new(path: path, model_type: type)
-      end
+      ModelValidatedMessage.new(path: path, model_type: type)
     rescue => e
       ModelValidatedMessage.new(path: path, error: e.message)
     end
   end
 
   def handle_model_validated(message)
-    if message.error == "incompatible"
-      @incompatible_models << message.path unless @incompatible_models.include?(message.path)
-      @model_types.delete(message.path)
-      # If this was the selected model, deselect and refresh
-      if @selected_model_path == message.path
-        name = File.basename(message.path)
-        @error_message = "\"#{name}\" is not a supported diffusion model — removed from list"
-        @selected_model_path = nil
-      end
-      save_config
-      scan_models
-    elsif message.model_type
+    if message.model_type
       @model_types[message.path] = message.model_type
       save_config
       scan_models  # refresh list to show detected type
@@ -843,8 +847,8 @@ class Chewy
 
   # ========== Progressive Reveal ==========
 
-  REVEAL_PHASES = 5 # phases 0..4: very blocky → full resolution
-  REVEAL_DELAYS = [0.05, 0.12, 0.15, 0.18, 0.0].freeze # delay before next phase
+  REVEAL_PHASES = 10 # phases 0..9: very blocky → full resolution
+  REVEAL_DELAYS = [0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.10, 0.12, 0.14, 0.0].freeze
 
   def handle_reveal_tick(message)
     phase = message.phase
@@ -1046,6 +1050,9 @@ class Chewy
       if current_key == :sampler
         @sampler_index = (@sampler_index + 1) % SAMPLER_OPTIONS.length
         @sampler = SAMPLER_OPTIONS[@sampler_index]
+      elsif current_key == :scheduler
+        @scheduler_index = (@scheduler_index + 1) % SCHEDULER_OPTIONS.length
+        @scheduler = SCHEDULER_OPTIONS[@scheduler_index]
       else
         @editing_param = true
         @param_edit_buffer = param_value(current_key).to_s
@@ -1054,23 +1061,33 @@ class Chewy
       if current_key == :sampler
         @sampler_index = (@sampler_index - 1) % SAMPLER_OPTIONS.length
         @sampler = SAMPLER_OPTIONS[@sampler_index]
+      elsif current_key == :scheduler
+        @scheduler_index = (@scheduler_index - 1) % SCHEDULER_OPTIONS.length
+        @scheduler = SCHEDULER_OPTIONS[@scheduler_index]
       end
     when "right"
       if current_key == :sampler
         @sampler_index = (@sampler_index + 1) % SAMPLER_OPTIONS.length
         @sampler = SAMPLER_OPTIONS[@sampler_index]
+      elsif current_key == :scheduler
+        @scheduler_index = (@scheduler_index + 1) % SCHEDULER_OPTIONS.length
+        @scheduler = SCHEDULER_OPTIONS[@scheduler_index]
       end
     end
     [self, nil]
   end
 
   def param_value(key)
-    key == :sampler ? @sampler : @params[key]
+    case key
+    when :sampler then @sampler
+    when :scheduler then @scheduler
+    else @params[key]
+    end
   end
 
   def commit_param_edit
     key = @param_display_keys[@param_index]
-    return if key == :sampler
+    return if key == :sampler || key == :scheduler
 
     current = @params[key]
     new_val = current.is_a?(Float) ? @param_edit_buffer.to_f : @param_edit_buffer.to_i
@@ -1081,6 +1098,8 @@ class Chewy
       @params[key] = new_val.clamp(1, 9)
     elsif key == :strength
       @params[key] = new_val.to_f.clamp(0.01, 1.0)
+    elsif key == :threads
+      @params[key] = new_val.clamp(1, Etc.nprocessors)
     elsif new_val > 0
       @params[key] = new_val
     end
@@ -1230,6 +1249,7 @@ class Chewy
       @companion_download_size = content_length
 
       curl_args = ["curl", "-fL", "-o", part, "-sS",
+                   "-C", "-", "--retry", "3", "--retry-delay", "2", "--retry-all-errors",
                    "-H", "Authorization: Bearer #{hf_token}", url]
       _out, err, st = Open3.capture3(*curl_args)
       if st.success?
@@ -1294,7 +1314,7 @@ class Chewy
     prompt = full_prompt; negative = negative_text
     steps = @params[:steps]; cfg = @params[:cfg_scale]
     w = @params[:width]; h = @params[:height]
-    base_seed = @params[:seed]; sampler = @sampler
+    base_seed = @params[:seed]; sampler = @sampler; scheduler = @scheduler
     output_dir = @output_dir; batch_count = @params[:batch]
     lora_dir = @lora_dir; has_loras = @selected_loras.any?
     is_flux = flux_model?(model)
@@ -1303,11 +1323,12 @@ class Chewy
     flux_vae = flux_companion_path("vae")
     init_img = @init_image_path
     strength = @params[:strength]
+    threads = @params[:threads]
 
     sidecar_base = {
       "prompt" => prompt_text, "negative_prompt" => negative_text,
       "model" => model, "steps" => steps, "cfg_scale" => cfg,
-      "width" => w, "height" => h, "sampler" => sampler,
+      "width" => w, "height" => h, "sampler" => sampler, "scheduler" => scheduler,
       "model_type" => is_flux ? "flux" : "sd",
     }
     sidecar_base["init_image"] = init_img if init_img
@@ -1318,112 +1339,148 @@ class Chewy
       error_result = nil; total_start = Time.now
       preview_path = File.join(output_dir, ".preview_#{Process.pid}.png")
 
-      batch_count.times do |i|
-        break if @gen_cancelled
+      @gen_current_batch = 1
+      @gen_step = 0; @gen_total_steps = 0
 
-        @gen_current_batch = i + 1
-        @gen_step = 0; @gen_total_steps = 0
+      timestamp = Time.now.strftime("%Y%m%d_%H%M%S")
+      output_path = File.join(output_dir, "#{timestamp}.png")
 
-        seed = base_seed == -1 ? -1 : base_seed + i
-        timestamp = Time.now.strftime("%Y%m%d_%H%M%S")
-        output_path = File.join(output_dir, "#{timestamp}.png")
+      @gen_preview_path = preview_path
+      @gen_preview_mtime = nil
+      @gen_preview_cache = nil
 
-        @gen_preview_path = preview_path
-        @gen_preview_mtime = nil
-        @gen_preview_cache = nil
+      args = if is_flux
+        [sd_bin, "--diffusion-model", model,
+         "--clip_l", flux_clip_l, "--t5xxl", flux_t5xxl, "--vae", flux_vae,
+         "-p", prompt,
+         "--steps", steps.to_s, "--cfg-scale", cfg.to_s,
+         "--guidance", "3.5",
+         "-W", w.to_s, "-H", h.to_s,
+         "--seed", base_seed.to_s, "--sampling-method", sampler,
+         "--scheduler", scheduler,
+         "-t", threads.to_s, "--fa", "--vae-tiling", "--clip-on-cpu",
+         "--cache-mode", "spectrum",
+         "-b", batch_count.to_s,
+         "-o", output_path]
+      else
+        [sd_bin, "-m", model, "-p", prompt,
+         "--steps", steps.to_s, "--cfg-scale", cfg.to_s,
+         "-W", w.to_s, "-H", h.to_s,
+         "--seed", base_seed.to_s, "--sampling-method", sampler,
+         "--scheduler", scheduler,
+         "-t", threads.to_s, "--fa", "--vae-tiling", "--clip-on-cpu",
+         "--cache-mode", "spectrum",
+         "-b", batch_count.to_s,
+         "-o", output_path]
+      end
+      args += ["--preview", "proj", "--preview-path", preview_path, "--preview-interval", "1"]
+      args += ["--negative-prompt", negative] unless negative.empty?
+      args += ["--lora-model-dir", lora_dir] if has_loras && !is_flux
+      if init_img
+        args += ["--init-img", init_img, "--strength", strength.to_s]
+      end
 
-        args = if is_flux
-          [sd_bin, "--diffusion-model", model,
-           "--clip_l", flux_clip_l, "--t5xxl", flux_t5xxl, "--vae", flux_vae,
-           "-p", prompt,
-           "--steps", steps.to_s, "--cfg-scale", cfg.to_s,
-           "-W", w.to_s, "-H", h.to_s,
-           "--seed", seed.to_s, "--sampling-method", sampler,
-           "-o", output_path]
-        else
-          [sd_bin, "-m", model, "-p", prompt,
-           "--steps", steps.to_s, "--cfg-scale", cfg.to_s,
-           "-W", w.to_s, "-H", h.to_s,
-           "--seed", seed.to_s, "--sampling-method", sampler,
-           "-o", output_path]
-        end
-        args += ["--preview", "proj", "--preview-path", preview_path, "--preview-interval", "1"]
-        args += ["--negative-prompt", negative] unless negative.empty?
-        args += ["--lora-model-dir", lora_dir] if has_loras && !is_flux
-        if init_img
-          args += ["--init-img", init_img, "--strength", strength.to_s]
-        end
+      begin
+        start_time = Time.now
+        pty_r, _pty_w, pid = PTY.spawn(*args)
+        @gen_pid = pid
 
-        begin
-          start_time = Time.now
-          pty_r, _pty_w, pid = PTY.spawn(*args)
-          @gen_pid = pid
+        all_output = +""; parsed_seed = nil; sampling_started = false
+        buf = +""
+        status = nil
+        batch_seeds = []
 
-          all_output = +""; parsed_seed = nil; sampling_started = false
-          buf = +""
-          status = nil
-
-          # Single-thread loop: read output + check if process exited
-          loop do
-            ready = IO.select([pty_r], nil, nil, 0.25)
-            if ready
-              begin
+        # Single-thread loop: read output + check if process exited
+        loop do
+          ready = IO.select([pty_r], nil, nil, 0.25)
+          if ready
+            begin
+              chunk = pty_r.readpartial(4096)
+              buf << chunk
+              all_output << chunk
+              parse_sd_output(buf, sampling_started, parsed_seed) { |new_buf, ss, ps|
+                if ps && ps != parsed_seed
+                  batch_seeds << ps
+                  @gen_current_batch = batch_seeds.length
+                end
+                buf = new_buf; sampling_started = ss; parsed_seed = ps
+              }
+            rescue Errno::EIO, EOFError
+              break
+            end
+          end
+          # Non-blocking check if process exited
+          begin
+            _, status = Process.waitpid2(pid, Process::WNOHANG)
+            if status
+              # Drain remaining output
+              loop do
                 chunk = pty_r.readpartial(4096)
-                buf << chunk
                 all_output << chunk
+                buf << chunk
                 parse_sd_output(buf, sampling_started, parsed_seed) { |new_buf, ss, ps|
+                  if ps && ps != parsed_seed
+                    batch_seeds << ps
+                    @gen_current_batch = batch_seeds.length
+                  end
                   buf = new_buf; sampling_started = ss; parsed_seed = ps
                 }
               rescue Errno::EIO, EOFError
                 break
               end
-            end
-            # Non-blocking check if process exited
-            begin
-              _, status = Process.waitpid2(pid, Process::WNOHANG)
-              if status
-                # Drain remaining output
-                loop do
-                  chunk = pty_r.readpartial(4096)
-                  all_output << chunk
-                  buf << chunk
-                  parse_sd_output(buf, sampling_started, parsed_seed) { |new_buf, ss, ps|
-                    buf = new_buf; sampling_started = ss; parsed_seed = ps
-                  }
-                rescue Errno::EIO, EOFError
-                  break
-                end
-                break
-              end
-            rescue Errno::ECHILD
               break
             end
-          end
-
-          # If we broke out before reaping (e.g. EIO), wait now
-          _, status = Process.wait2(pid) rescue nil unless status
-          pty_r.close rescue nil
-          @gen_pid = nil
-          elapsed = (Time.now - start_time).round(1)
-
-          if @gen_cancelled || status&.signaled?
-            File.delete(output_path) if File.exist?(output_path)
-            File.delete(preview_path) if File.exist?(preview_path)
+          rescue Errno::ECHILD
             break
           end
+        end
 
-          if status&.success? || (status.nil? && File.exist?(output_path) && File.size(output_path) > 0)
-            @last_seed = parsed_seed
-            last_output = output_path; last_elapsed = elapsed
+        # If we broke out before reaping (e.g. EIO), wait now
+        _, status = Process.wait2(pid) rescue nil unless status
+        pty_r.close rescue nil
+        @gen_pid = nil
+        elapsed = (Time.now - start_time).round(1)
 
-            sidecar_path = output_path.sub(/\.png$/, ".json")
-            unless File.exist?(sidecar_path)
-              sidecar = sidecar_base.merge(
-                "seed" => parsed_seed || seed,
-                "timestamp" => Time.now.iso8601,
-                "generation_time_seconds" => elapsed
-              )
-              File.write(sidecar_path, JSON.pretty_generate(sidecar))
+        if @gen_cancelled || status&.signaled?
+          # Clean up any generated batch files
+          if batch_count > 1
+            batch_count.times { |i| File.delete("#{output_path.sub(/\.png$/, "")}_#{i}.png") rescue nil }
+          else
+            File.delete(output_path) rescue nil
+          end
+          File.delete(preview_path) rescue nil
+        elsif status&.success? || status.nil?
+          # Collect generated files — sd.cpp uses _N suffixes for batch > 1
+          generated = []
+          if batch_count > 1
+            base = output_path.sub(/\.png$/, "")
+            batch_count.times do |i|
+              f = "#{base}_#{i}.png"
+              next unless File.exist?(f) && File.size(f) > 0
+              ts = Time.now.strftime("%Y%m%d_%H%M%S_%L") + "_#{i}"
+              final = File.join(output_dir, "#{ts}.png")
+              File.rename(f, final)
+              generated << [final, batch_seeds[i] || (base_seed == -1 ? nil : base_seed + i)]
+            end
+          else
+            if File.exist?(output_path) && File.size(output_path) > 0
+              generated << [output_path, parsed_seed || base_seed]
+            end
+          end
+
+          if generated.any?
+            @last_seed = generated.last[1]
+            last_output = generated.last[0]; last_elapsed = elapsed
+            generated.each do |path, seed_val|
+              sidecar_path = path.sub(/\.png$/, ".json")
+              unless File.exist?(sidecar_path)
+                sidecar = sidecar_base.merge(
+                  "seed" => seed_val,
+                  "timestamp" => Time.now.iso8601,
+                  "generation_time_seconds" => elapsed
+                )
+                File.write(sidecar_path, JSON.pretty_generate(sidecar))
+              end
             end
           else
             exit_code = status&.exitstatus || "unknown"
@@ -1435,23 +1492,28 @@ class Chewy
               "Not enough memory for this model — try a smaller/quantized version"
             end
             msg = hint || "Failed (exit #{exit_code}): #{last_line}"
-            error_result = GenerationErrorMessage.new(
-              error: msg,
-              stderr_output: all_output
-            )
-            break
+            error_result = GenerationErrorMessage.new(error: msg, stderr_output: all_output)
           end
-        rescue Errno::ENOENT
-          @gen_pid = nil
-          error_result = GenerationErrorMessage.new(
-            error: "Binary '#{sd_bin}' not found. Set SD_BIN env var.", stderr_output: ""
-          )
-          break
-        rescue => e
-          @gen_pid = nil
-          error_result = GenerationErrorMessage.new(error: e.message, stderr_output: "")
-          break
+        else
+          exit_code = status&.exitstatus || "unknown"
+          last_line = all_output.lines.last&.strip || "unknown"
+          hint = if all_output.include?("get sd version from file failed") || all_output.include?("new_sd_ctx_t failed")
+            name = File.basename(model)
+            "\"#{name}\" is not a supported diffusion model — try a different model"
+          elsif all_output.include?("out of memory") || all_output.include?("GGML_ASSERT")
+            "Not enough memory for this model — try a smaller/quantized version"
+          end
+          msg = hint || "Failed (exit #{exit_code}): #{last_line}"
+          error_result = GenerationErrorMessage.new(error: msg, stderr_output: all_output)
         end
+      rescue Errno::ENOENT
+        @gen_pid = nil
+        error_result = GenerationErrorMessage.new(
+          error: "Binary '#{sd_bin}' not found. Set SD_BIN env var.", stderr_output: ""
+        )
+      rescue => e
+        @gen_pid = nil
+        error_result = GenerationErrorMessage.new(error: e.message, stderr_output: "")
       end
 
       # Clean up preview file
@@ -1737,13 +1799,15 @@ class Chewy
     @download_total = size || 0; @download_filename = filename; @error_message = nil
     url = "#{HF_DOWNLOAD_BASE}/#{repo_id}/resolve/main/#{URI.encode_www_form_component(filename)}"
     Proc.new do
-      _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s", url)
+      _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",
+        "-C", "-", "--retry", "5", "--retry-delay", "3", "--retry-all-errors",
+        "--connect-timeout", "30", url)
       if st.success?
         File.rename(part, dest)
         ModelDownloadDoneMessage.new(path: dest, filename: filename)
       else
-        File.delete(part) if File.exist?(part)
-        ModelDownloadErrorMessage.new(error: "curl failed (exit #{st.exitstatus}): #{err.strip}")
+        # Keep .part file so resume works on next attempt
+        ModelDownloadErrorMessage.new(error: "Download failed (exit #{st.exitstatus}). Try again to resume.")
       end
     rescue Errno::ENOENT
       File.delete(part) if File.exist?(part)
@@ -1995,6 +2059,8 @@ class Chewy
     @params[:seed] = entry["seed"] || -1
     @sampler = entry["sampler"] || "euler_a"
     @sampler_index = SAMPLER_OPTIONS.index(@sampler) || 1
+    @scheduler = entry["scheduler"] || "discrete"
+    @scheduler_index = SCHEDULER_OPTIONS.index(@scheduler) || 0
     if entry["model"] && File.exist?(entry["model"])
       @selected_model_path = entry["model"]
     end
@@ -2210,13 +2276,18 @@ class Chewy
       @sampler = d["sampler"]
       @sampler_index = SAMPLER_OPTIONS.index(@sampler) || 1
     end
+    if d["scheduler"]
+      @scheduler = d["scheduler"]
+      @scheduler_index = SCHEDULER_OPTIONS.index(@scheduler) || 0
+    end
   end
 
   def save_user_preset(name)
     @user_presets[name] = {
       "steps" => @params[:steps], "cfg_scale" => @params[:cfg_scale],
       "width" => @params[:width], "height" => @params[:height],
-      "seed" => @params[:seed], "sampler" => @sampler, "batch" => @params[:batch],
+      "seed" => @params[:seed], "sampler" => @sampler, "scheduler" => @scheduler,
+      "batch" => @params[:batch],
     }
     save_presets
   end
@@ -2510,7 +2581,7 @@ class Chewy
     end
   end
 
-  def render_image_halfblocks(path, max_w, max_h, pixelate: nil)
+  def render_image_halfblocks(path, max_w, max_h, pixelate: nil, corner_radius: 0)
     return nil unless path && File.exist?(path)
 
     image = ChunkyPNG::Image.from_file(path)
@@ -2533,30 +2604,72 @@ class Chewy
       resized = tiny.resample_nearest_neighbor(new_w, new_h)
     end
 
+    total_rows = (new_h + 1) / 2
+    r = corner_radius
+
     lines = []
     y = 0
+    row = 0
     while y < new_h
       line = +""
       new_w.times do |x|
-        top = resized[x, y]
-        bottom = (y + 1 < new_h) ? resized[x, y + 1] : ChunkyPNG::Color::BLACK
+        if r > 0 && corner_blank?(x, row, new_w, total_rows, r)
+          line << " "
+        else
+          top = resized[x, y]
+          bottom = (y + 1 < new_h) ? resized[x, y + 1] : ChunkyPNG::Color::BLACK
 
-        tr = ChunkyPNG::Color.r(top)
-        tg = ChunkyPNG::Color.g(top)
-        tb = ChunkyPNG::Color.b(top)
-        br = ChunkyPNG::Color.r(bottom)
-        bg_ = ChunkyPNG::Color.g(bottom)
-        bb = ChunkyPNG::Color.b(bottom)
+          tr = ChunkyPNG::Color.r(top)
+          tg = ChunkyPNG::Color.g(top)
+          tb = ChunkyPNG::Color.b(top)
+          br = ChunkyPNG::Color.r(bottom)
+          bg_ = ChunkyPNG::Color.g(bottom)
+          bb = ChunkyPNG::Color.b(bottom)
 
-        line << "\e[38;2;#{tr};#{tg};#{tb}m\e[48;2;#{br};#{bg_};#{bb}m\u2580\e[0m"
+          line << "\e[38;2;#{tr};#{tg};#{tb}m\e[48;2;#{br};#{bg_};#{bb}m\u2580\e[0m"
+        end
       end
       lines << line
       y += 2
+      row += 1
     end
 
     lines.join("\n")
   rescue
     nil
+  end
+
+  def corner_blank?(x, row, width, height, radius)
+    # Top-left
+    if x < radius && row < radius
+      dx = radius - x - 0.5
+      dy = radius - row - 0.5
+      return dx * dx + dy * dy > radius * radius
+    end
+    # Top-right
+    if x >= width - radius && row < radius
+      dx = x - (width - radius) + 0.5
+      dy = radius - row - 0.5
+      return dx * dx + dy * dy > radius * radius
+    end
+    # Bottom-left
+    if x < radius && row >= height - radius
+      dx = radius - x - 0.5
+      dy = row - (height - radius) + 0.5
+      return dx * dx + dy * dy > radius * radius
+    end
+    # Bottom-right
+    if x >= width - radius && row >= height - radius
+      dx = x - (width - radius) + 0.5
+      dy = row - (height - radius) + 0.5
+      return dx * dx + dy * dy > radius * radius
+    end
+    false
+  end
+
+  def gradient_border_color
+    colors = Theme.gradient(Theme.PRIMARY, Theme.ACCENT, 3)
+    colors[1] # midpoint blend of primary and accent
   end
 
   # slot: stable ID for this image position (avoids flicker on re-render)
@@ -2616,8 +2729,8 @@ class Chewy
   # Route to halfblocks for lipgloss-compatible rendering
   # Kitty graphics are used only in fullscreen mode (render_fullscreen_image)
   # because lipgloss miscounts kitty escape sequences as visible characters
-  def render_image(path, max_w, max_h, pixelate: nil)
-    render_image_halfblocks(path, max_w, max_h, pixelate: pixelate)
+  def render_image(path, max_w, max_h, pixelate: nil, corner_radius: 0)
+    render_image_halfblocks(path, max_w, max_h, pixelate: pixelate, corner_radius: corner_radius)
   end
 
   # ========== Rendering: Main View ==========
@@ -2626,10 +2739,9 @@ class Chewy
     header = render_header
     left = render_left_panel
     right = render_right_panel
-    status = render_status_bar
-    help = render_help_bar
+    bottom = render_bottom_bar
     body = Lipgloss.join_horizontal(:top, left, right)
-    Lipgloss.join_vertical(:left, header, body, status, help)
+    Lipgloss.join_vertical(:left, header, body, bottom)
   end
 
   def render_header
@@ -2640,45 +2752,61 @@ class Chewy
       name = File.basename(@selected_model_path, File.extname(@selected_model_path))
       is_flux = flux_model?(@selected_model_path)
       cached_type = @model_types[@selected_model_path]
+
+      # Extract quantization from filename (e.g. Q4_K, Q8_0, F16)
+      quant = name.match(/[_-](Q\d_\w+|F16|F32|q\d_\w+|f16|f32)/i)&.captures&.first&.upcase
+
       type_label = if is_flux || cached_type == "FLUX"
         ok = flux_companions_present?
-        s = Lipgloss::Style.new.foreground(ok ? Theme.SUCCESS : Theme.WARNING).bold(true)
-        " #{s.render(ok ? 'FLUX' : 'FLUX!')}"
+        pill_bg = ok ? Theme.SUCCESS : Theme.WARNING
+        " #{Lipgloss::Style.new.background(pill_bg).foreground(Theme.SURFACE).bold(true).render(" FLUX ")}"
+      elsif quant
+        " #{Lipgloss::Style.new.background(Theme.SECONDARY).foreground(Theme.BAR_TEXT).bold(true).render(" #{quant} ")}"
       elsif cached_type
-        " #{dim.render(cached_type)}"
+        " #{Lipgloss::Style.new.background(Theme.SECONDARY).foreground(Theme.BAR_TEXT).render(" #{cached_type} ")}"
       else
-        " #{dim.render('SD')}"
+        " #{Lipgloss::Style.new.background(Theme.BORDER_DIM).foreground(Theme.TEXT).render(" SD ")}"
       end
-      " #{dim.render('|')} #{Lipgloss::Style.new.foreground(Theme.TEXT).render(name)}#{type_label}"
+      " #{dim.render("\u2502")} #{Lipgloss::Style.new.foreground(Theme.TEXT).bold(true).render(name)}#{type_label}"
     else
-      " #{dim.render('| no model selected')}"
+      " #{dim.render("\u2502")} #{dim.render("no model selected")}"
     end
 
     img2img_badge = if @init_image_path
       name = File.basename(@init_image_path)
-      # Truncate filename if too long
       name = name[0, 20] + "..." if name.length > 23
       i2i = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true)
-      " #{dim.render('|')} #{i2i.render('img2img')} #{dim.render(name)}"
+      " #{dim.render("\u2502")} #{i2i.render("img2img")} #{dim.render(name)}"
     else
       ""
     end
 
-    model_hint = dim.render("  [^n] models")
+    left = "#{logo}#{model_info}#{img2img_badge}"
+    right = dim.render("[^n] models ")
 
-    Lipgloss::Style.new.width(@width).bold(true).background(Theme.SURFACE).render("#{logo}#{model_info}#{model_hint}#{img2img_badge}")
+    # Right-align the hint
+    left_visible = left.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
+    right_visible = right.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
+    gap = [@width - left_visible - right_visible, 1].max
+
+    Lipgloss::Style.new.width(@width).background(Theme.SURFACE).render("#{left}#{' ' * gap}#{right}")
   end
 
   def left_panel_heights
-    body_h = @height - 4
+    body_h = @height - 2  # header + bottom bar
 
-    # Params needs: label + separator + N params + 2 border lines
-    params_min = @param_display_keys.length + 4
-    params_h = [params_min, (body_h * 0.30).to_i].max
+    if @focus == FOCUS_PARAMS
+      # Expanded: label + separator + N params + 2 border lines
+      params_min = @param_display_keys.length + 4
+      params_h = [params_min, (body_h * 0.30).to_i].max
+    else
+      # Compact: border + 1 line of inline params + border
+      params_h = 3
+    end
 
     remaining = [body_h - params_h, 8].max
-    prompt_h = [(remaining * 0.5).to_i, 5].max
-    negative_h = [remaining - prompt_h, 5].max
+    prompt_h = [(remaining * 0.6).to_i, 5].max
+    negative_h = [remaining - prompt_h, 4].max
 
     # Rebalance if we overshot
     total = prompt_h + negative_h + params_h
@@ -2702,24 +2830,20 @@ class Chewy
 
   def render_right_panel
     rw = right_panel_width
-    body_h = @height - 4
-
     prompt_h, negative_h, params_h = left_panel_heights
     total_left = prompt_h + negative_h + params_h
 
-    border_color = Theme.BORDER_DIM
-
     content = if @generating
-      render_generating_preview(rw - 4, total_left - 2)
+      render_generating_preview(rw - 2, total_left)
     elsif @last_output_path && File.exist?(@last_output_path)
-      render_image_preview(rw - 4, total_left - 2)
+      render_image_preview(rw - 2, total_left)
     else
-      render_empty_preview(rw - 4, total_left - 2)
+      render_empty_preview(rw - 2, total_left)
     end
 
     Lipgloss::Style.new
-      .border(:rounded).border_foreground(border_color).background(Theme.SURFACE)
-      .width(rw - 4).height(total_left - 2).render(content)
+      .background(Theme.SURFACE)
+      .width(rw - 2).height(total_left).padding(0, 1).render(content)
   end
 
   def render_image_preview(max_w, max_h)
@@ -2728,19 +2852,14 @@ class Chewy
       return @preview_cache
     end
 
-    # Progressive reveal: phase 0=very blocky, 4=full res
+    # Progressive reveal: phase 0=very blocky, 9=full res
     pixelate = if @reveal_phase
-                 [16, 8, 4, 2, nil][@reveal_phase]
+                 [64, 32, 20, 14, 10, 7, 5, 3, 2, nil][@reveal_phase]
                end
 
-    img_str = render_image(@last_output_path, max_w, max_h - 2, pixelate: pixelate)
+    img_str = render_image(@last_output_path, max_w, max_h, pixelate: pixelate, corner_radius: 3)
     if img_str
-      centered_img = center_image(img_str, max_w)
-      dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
-      info = "#{File.basename(@last_output_path)}  #{dim.render("| ^e open | #{@last_generation_time}s")}"
-      seed_info = @last_seed ? "  #{dim.render("| seed #{@last_seed}")}" : ""
-      info_line = Lipgloss::Style.new.width(max_w).align(:center).render("#{info}#{seed_info}")
-      result = "#{centered_img}\n#{info_line}"
+      result = center_image(img_str, max_w)
       # Only cache at full resolution
       if @reveal_phase.nil?
         @preview_cache = result
@@ -2753,7 +2872,6 @@ class Chewy
   end
 
   def render_generating_preview(max_w, max_h)
-    accent = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true)
     dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
     center = ->(s) { Lipgloss::Style.new.width(max_w).align(:center).render(s) }
 
@@ -2761,11 +2879,19 @@ class Chewy
     elapsed = (Time.now - @gen_start_time).to_i
     elapsed_str = elapsed >= 60 ? "#{elapsed / 60}m#{elapsed % 60}s" : "#{elapsed}s"
 
+    # Animated dots
+    dots = "\u2022" * ((elapsed % 3) + 1)
+    dots_pad = " " * (3 - (elapsed % 3) - 1)
+
+    # Gradient "Generating" text
+    gen_text = Theme.gradient_text("Generating", Theme.PRIMARY, Theme.ACCENT)
+
     # Build status lines (centered)
     status_lines = []
 
     if @gen_total_steps > 0 && @gen_step > 0
       pct = @gen_step.to_f / @gen_total_steps
+      pct_text = "#{(pct * 100).to_i}%"
       bar = @progress.view_as(pct)
       remaining = @gen_total_steps - @gen_step
       eta_str = if @gen_secs_per_step && @gen_secs_per_step > 0
@@ -2779,27 +2905,28 @@ class Chewy
       else
         ""
       end
-      # Generating + progress inline
-      status_lines << center.call("#{@spinner.view} #{accent.render("Generating")} #{dim.render(elapsed_str)}")
+
+      status_lines << center.call("#{@spinner.view} #{gen_text} #{dim.render(elapsed_str)}")
       status_lines << ""
       status_lines << center.call(bar)
       detail = [
-        "#{@gen_step}/#{@gen_total_steps}",
-        speed_str,
-        eta_str,
-      ].reject(&:empty?).join("  ")
-      status_lines << center.call(dim.render(detail))
+        Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true).render(pct_text),
+        dim.render("#{@gen_step}/#{@gen_total_steps}"),
+        dim.render(speed_str),
+        dim.render(eta_str),
+      ].reject { |s| s.gsub(/\e\[[0-9;]*[A-Za-z]/, "").strip.empty? }.join("  ")
+      status_lines << center.call(detail)
     else
-      status_lines << center.call("#{@spinner.view} #{accent.render("Generating")} #{dim.render(elapsed_str)}")
+      status_text = @gen_status || "Starting"
+      status_lines << center.call("#{@spinner.view} #{gen_text} #{dim.render(dots)}#{dots_pad}")
       status_lines << ""
-      status_lines << center.call(dim.render(@gen_status || "Starting..."))
+      status_lines << center.call(dim.render(status_text))
     end
 
     if @gen_total_batch > 1
-      status_lines << center.call(dim.render("Batch #{@gen_current_batch}/#{@gen_total_batch}"))
+      batch_text = "Batch #{@gen_current_batch}/#{@gen_total_batch}"
+      status_lines << center.call(Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render(batch_text))
     end
-    status_lines << ""
-    status_lines << center.call(dim.render("^x cancel"))
 
     # Try to show live preview image
     preview_img = load_gen_preview(max_w, max_h - status_lines.length - 1)
@@ -2827,7 +2954,7 @@ class Chewy
         return @gen_preview_cache
       end
 
-      img_str = render_image(@gen_preview_path, max_w, max_h)
+      img_str = render_image(@gen_preview_path, max_w, max_h, corner_radius: 3)
       if img_str
         @gen_preview_cache = img_str
         @gen_preview_mtime = mtime
@@ -2840,69 +2967,153 @@ class Chewy
 
   def render_empty_preview(max_w, max_h)
     dim = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+    key_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
     center = ->(s) { Lipgloss::Style.new.width(max_w).align(:center).render(s) }
 
     # Show logo in empty preview area
     logo_path = File.join(__dir__, "logo.png")
     logo_img = if File.exist?(logo_path)
-      logo_h = max_h - 4
+      logo_h = [max_h - 10, 4].max
       render_logo_halfblocks(logo_path, max_w - 4, logo_h)
     end
 
+    lines = []
     if logo_img
       centered_logo = center_image(logo_img, max_w)
-      lines = centered_logo.split("\n") + ["", center.call(dim.render("Press enter to generate"))]
-      pad_top = [(max_h - lines.length) / 2, 0].max
-      (Array.new(pad_top, "") + lines).join("\n")
-    else
-      lines = [center.call(dim.render("No image yet")), "", center.call(dim.render("Press enter to generate"))]
-      pad_top = [(max_h - lines.length) / 2, 0].max
-      (Array.new(pad_top, "") + lines).join("\n")
+      lines += centered_logo.split("\n")
     end
+    lines << ""
+    lines << center.call(Theme.gradient_text("Ready to create", Theme.PRIMARY, Theme.ACCENT))
+    lines << ""
+
+    # Styled shortcut hints — left-aligned block, centered as a whole
+    hints = [
+      ["enter", "generate image"],
+      ["^n", "select model"],
+      ["^d", "download models"],
+      ["^p", "load preset"],
+    ]
+    hint_lines = hints.map { |k, d| "#{key_style.render(k.ljust(7))} #{desc_style.render(d)}" }
+    max_hint_w = hints.map { |k, d| 7 + 1 + d.length }.max
+    pad = [(max_w - max_hint_w) / 2, 0].max
+    hint_lines.each { |l| lines << (" " * pad) + l }
+
+    pad_top = [(max_h - lines.length) / 2, 0].max
+    (Array.new(pad_top, "") + lines).join("\n")
+  end
+
+  def render_wrapped_input(input, max_lines:)
+    value = input.value
+    width = [input.width, 1].max
+    max_lines = [max_lines, 1].max
+
+    return input.view if value.empty? || value.chars.length <= width
+
+    lines, positions = wrapped_input_layout(value, width)
+    cursor_line, cursor_col = positions[input.position]
+    start_line = [cursor_line - max_lines + 1, 0].max
+    visible_lines = lines[start_line, max_lines] || []
+
+    visible_lines.map.with_index do |line, offset|
+      line_index = start_line + offset
+      if input.focused? && line_index == cursor_line
+        line_chars = line.chars
+        before = line_chars[0...cursor_col].join
+        char = line_chars[cursor_col] || " "
+        after = line_chars[(cursor_col + 1)..]&.join.to_s
+
+        input.cursor.char = char
+        "#{render_input_text(before, input.text_style)}#{input.cursor.view}#{render_input_text(after, input.text_style)}"
+      else
+        render_input_text(line, input.text_style)
+      end
+    end.join("\n")
+  end
+
+  def wrapped_input_layout(value, width)
+    chars = value.chars
+    lines = [[]]
+    positions = Array.new(chars.length + 1)
+    line_index = 0
+
+    chars.each_with_index do |char, idx|
+      if lines[line_index].length >= width
+        line_index += 1
+        lines << []
+      end
+
+      positions[idx] = [line_index, lines[line_index].length]
+
+      # Skip the whitespace that triggered the wrap so continuation lines start on content.
+      next if line_index.positive? && lines[line_index].empty? && char == " "
+
+      lines[line_index] << char
+    end
+
+    if lines[line_index].length >= width
+      line_index += 1
+      lines << []
+    end
+
+    positions[chars.length] = [line_index, lines[line_index].length]
+    [lines.map(&:join), positions]
+  end
+
+  def render_input_text(text, style)
+    return "" if text.empty?
+
+    style ? style.render(text) : text
   end
 
   def render_prompt_section(tw, box_h)
     focused = @focus == FOCUS_PROMPT
-    border_color = focused ? Theme.BORDER_FOCUS : Theme.BORDER_DIM
 
     label_style = Lipgloss::Style.new.foreground(focused ? Theme.PRIMARY : Theme.TEXT_DIM).bold(focused)
     label = label_style.render("Prompt")
 
     lora_tags = if @selected_loras.any?
-      tag_style = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true)
+      pill = Lipgloss::Style.new.background(Theme.ACCENT).foreground(Theme.SURFACE).bold(true)
       dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
-      tags = @selected_loras.map { |l| tag_style.render("[#{l[:name]}:#{l[:weight]}]") }
-      "\n#{dim.render("LoRA:")} #{tags.join(' ')}"
+      tags = @selected_loras.map { |l| pill.render(" #{l[:name]}:#{l[:weight]} ") }
+      "\n#{dim.render("LoRA")} #{tags.join(' ')}"
     else
       ""
     end
 
-    content = "#{label}\n#{@prompt_input.view}#{lora_tags}"
+    prompt_lines = [box_h - 4 - lora_tags.count("\n"), 1].max
+    prompt_view = render_wrapped_input(@prompt_input, max_lines: prompt_lines)
+    content = "#{label}\n#{prompt_view}#{lora_tags}"
 
-    Lipgloss::Style.new
-      .border(:rounded).border_foreground(border_color).background(Theme.SURFACE)
+    border_color = focused ? gradient_border_color : Theme.BORDER_DIM
+    Lipgloss::Style.new.border(:rounded).border_foreground(border_color).background(Theme.SURFACE)
       .width(tw - 2).height(box_h - 2).render(content)
   end
 
   def render_negative_section(tw, box_h)
     focused = @focus == FOCUS_NEGATIVE
-    border_color = focused ? Theme.BORDER_FOCUS : Theme.BORDER_DIM
 
     label_style = Lipgloss::Style.new.foreground(focused ? Theme.ACCENT : Theme.TEXT_DIM).bold(focused)
     label = label_style.render("Negative Prompt")
 
-    content = "#{label}\n#{@negative_input.view}"
+    negative_lines = [box_h - 3, 1].max
+    negative_view = render_wrapped_input(@negative_input, max_lines: negative_lines)
+    content = "#{label}\n#{negative_view}"
 
-    Lipgloss::Style.new
-      .border(:rounded).border_foreground(border_color).background(Theme.SURFACE)
+    border_color = focused ? gradient_border_color : Theme.BORDER_DIM
+    Lipgloss::Style.new.border(:rounded).border_foreground(border_color).background(Theme.SURFACE)
       .width(tw - 2).height(box_h - 2).render(content)
   end
 
   def render_params_section(tw, box_h)
     focused = @focus == FOCUS_PARAMS
-    border_color = focused ? Theme.BORDER_FOCUS : Theme.BORDER_DIM
 
-    label_style = Lipgloss::Style.new.foreground(focused ? Theme.PRIMARY : Theme.TEXT_DIM).bold(focused)
+    unless focused
+      return render_params_compact(tw, box_h)
+    end
+
+
+    label_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
     label = label_style.render("Parameters")
 
     dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
@@ -2917,7 +3128,7 @@ class Chewy
       display = if @editing_param && selected
         Lipgloss::Style.new.foreground(Theme.ACCENT).render(@param_edit_buffer) +
           Lipgloss::Style.new.foreground(Theme.ACCENT).blink(true).render("_")
-      elsif key == :sampler
+      elsif key == :sampler || key == :scheduler
         arrow = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
         "#{arrow.render("<")} #{val_style.render(value.to_s)} #{arrow.render(">")}"
       elsif key == :seed && value == -1
@@ -2929,7 +3140,7 @@ class Chewy
         val_style.render(value.to_s)
       end
 
-      if selected && focused
+      if selected
         cursor = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true).render("> ")
         lbl = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true).render(label_text)
         "#{cursor}#{lbl}  #{display}"
@@ -2940,7 +3151,29 @@ class Chewy
 
     content = "#{label}\n#{separator}\n#{param_lines.join("\n")}"
     Lipgloss::Style.new
-      .border(:rounded).border_foreground(border_color).background(Theme.SURFACE)
+      .border(:rounded).border_foreground(gradient_border_color)
+      .background(Theme.SURFACE)
+      .width(tw - 2).height(box_h - 2).padding(0, 1).render(content)
+  end
+
+  def render_params_compact(tw, box_h)
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    val = Lipgloss::Style.new.foreground(Theme.TEXT)
+
+    seed_display = @params[:seed] == -1 ? "random" : @params[:seed].to_s
+    items = [
+      "#{dim.render('steps')} #{val.render(@params[:steps].to_s)}",
+      "#{dim.render('cfg')} #{val.render(@params[:cfg_scale].to_s)}",
+      val.render("#{@params[:width]}\u00d7#{@params[:height]}"),
+      "#{dim.render('seed')} #{val.render(seed_display)}",
+      val.render(@sampler),
+    ]
+    items << val.render(@scheduler) if @scheduler != "discrete"
+
+    content = items.join("  ")
+
+    Lipgloss::Style.new
+      .border(:rounded).border_foreground(Theme.BORDER_DIM).background(Theme.SURFACE)
       .width(tw - 2).height(box_h - 2).padding(0, 1).render(content)
   end
 
@@ -2954,14 +3187,25 @@ class Chewy
     when :sampler then "Sampler  "
     when :batch then "Batch    "
     when :strength then "Strength "
+    when :scheduler then "Schedule "
+    when :threads then "Threads  "
     else key.to_s.ljust(9)
     end
   end
 
-  def render_status_bar
+  def render_bottom_bar
+    # Right side: context shortcuts
+    key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
+    desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+    sep = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" \u2502 ")
+    keys = context_keys
+    right = keys.map { |k, d| "#{key_style.render(k)} #{desc_style.render(d)}" }.join(sep)
+    right_visible = right.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
+
+    # Left side: status info
     if @error_message
-      error_bar = Lipgloss::Style.new.background(Theme.ERROR).foreground(Theme.BAR_TEXT).width(@width).padding(0, 1)
-      return error_bar.render("! #{@error_message}")
+      bar = Lipgloss::Style.new.background(Theme.ERROR).foreground(Theme.BAR_TEXT).width(@width).padding(0, 1)
+      return bar.render("! #{@error_message}")
     end
 
     if @companion_downloading
@@ -2977,39 +3221,53 @@ class Chewy
     end
 
     if @status_message
-      bar = Lipgloss::Style.new.background(Theme.PRIMARY).foreground(Theme.BAR_TEXT).width(@width).padding(0, 1)
-      return bar.render(@status_message)
+      left = @status_message
+      bg = Theme.PRIMARY; fg = Theme.BAR_TEXT
+    elsif @last_output_path && @last_generation_time
+      bg = if @reveal_phase && @reveal_phase < REVEAL_PHASES
+        progress = @reveal_phase.to_f / (REVEAL_PHASES - 1)
+        sweep_colors = Theme.gradient(Theme.SURFACE, Theme.PRIMARY, 10)
+        sweep_colors[(progress * 9).to_i]
+      else
+        Theme.PRIMARY
+      end
+      fg = if @reveal_phase && @reveal_phase < REVEAL_PHASES / 2
+        Theme.TEXT_DIM
+      else
+        Theme.BAR_TEXT
+      end
+      left = "output: #{File.basename(@last_output_path)} \u2502 #{@last_generation_time}s"
+      left += " \u2502 seed #{@last_seed}" if @last_seed
+    else
+      # No status — just show shortcuts on surface background
+      return Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE).render(right)
     end
 
-    ""
-  end
-
-  def render_help_bar
-    keys = context_keys
-    key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
-    desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
-    sep = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" | ")
-
-    items = keys.map { |k, d| "#{key_style.render(k)} #{desc_style.render(d)}" }
-    Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE).render(items.join(sep))
+    # Combine left info + right shortcuts in one bar
+    left_visible = left.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
+    gap = [@width - left_visible - right_visible - 4, 1].max
+    bar = Lipgloss::Style.new.background(bg).foreground(fg).width(@width).padding(0, 1)
+    bar.render("#{left}#{' ' * gap}#{right}")
   end
 
   def context_keys
-    base = [["tab", "focus"], ["^n", "models"], ["^q", "quit"]]
-
-    case @focus
+    keys = case @focus
     when FOCUS_PROMPT
-      base + [["enter", "generate"], ["up/dn", "history"]]
+      [["enter", "generate"], ["tab", "focus"], ["^n", "models"]]
     when FOCUS_NEGATIVE
-      base + [["enter", "generate"]]
+      [["enter", "generate"], ["tab", "focus"], ["^n", "models"]]
     when FOCUS_PARAMS
-      base + [["enter", "edit"], ["j/k", "nav"]]
+      [["enter", "edit"], ["j/k", "nav"], ["tab", "focus"]]
     else
-      base
-    end + [["^b", "img2img"], ["^v", "paste img"], ["^d", "download"], ["^a", "gallery"], ["^g", "history"], ["^l", "lora"], ["^p", "preset"], ["^t", "theme"]] +
-    (@init_image_path ? [["^u", "clear img"]] : []) +
-    (@last_output_path ? [["^e", "open"], ["^f", "fullscreen"]] : []) +
-    (@generating ? [["^x", "cancel"]] : [])
+      [["tab", "focus"], ["^n", "models"]]
+    end
+
+    keys << ["^x", "cancel"] if @generating
+    keys << ["^e", "open"] if @last_output_path && !@generating
+    keys << ["^f", "fullscreen"] if @last_output_path && !@generating
+    keys += [["^d", "download"], ["^a", "gallery"], ["^p", "preset"]]
+    keys << ["^q", "quit"]
+    keys
   end
 
   # ========== Rendering: Models Overlay ==========
@@ -3538,6 +3796,25 @@ class Chewy
     g = hex[2, 2].to_i(16)
     b = hex[4, 2].to_i(16)
     "\e[48;2;#{r};#{g};#{b}m"
+  end
+
+  # Remove background color from the 4 rounded corner characters
+  # so they appear transparent against the terminal background
+  def clear_corner_backgrounds(str)
+    lines = str.split("\n")
+    return str if lines.length < 2
+
+    # First line: clear bg on ╭ and ╮
+    lines[0] = lines[0]
+      .sub(/(\e\[[\d;]*m)*(\e\[48;2;[\d;]+m)(\e\[[\d;]*m)*(\u256D)/) { "#{$1}\e[49m#{$3}#{$4}" }
+      .sub(/(\e\[[\d;]*m)*(\e\[48;2;[\d;]+m)(\e\[[\d;]*m)*(\u256E)/) { "#{$1}\e[49m#{$3}#{$4}" }
+
+    # Last line: clear bg on ╰ and ╯
+    lines[-1] = lines[-1]
+      .sub(/(\e\[[\d;]*m)*(\e\[48;2;[\d;]+m)(\e\[[\d;]*m)*(\u2570)/) { "#{$1}\e[49m#{$3}#{$4}" }
+      .sub(/(\e\[[\d;]*m)*(\e\[48;2;[\d;]+m)(\e\[[\d;]*m)*(\u256F)/) { "#{$1}\e[49m#{$3}#{$4}" }
+
+    lines.join("\n")
   end
 
   # ========== Formatting ==========
