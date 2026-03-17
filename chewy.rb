@@ -896,7 +896,7 @@ class HuggingFaceInferenceProvider < Provider::Base
     { id: "HiDream-ai/HiDream-I1-Full", name: "HiDream I1", desc: "High detail generation" },
   ].freeze
 
-  BASE_URL = "https://api-inference.huggingface.co/models".freeze
+  BASE_URL = "https://router.huggingface.co/hf-inference/models".freeze
 
   def id; "huggingface"; end
   def display_name; "HuggingFace"; end
