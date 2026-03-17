@@ -4934,4 +4934,4 @@ if (new_version = check_for_updates)
   puts ""
 end
 
-Bubbletea.run(Chewy.new, alt_screen: true)
+Bubbletea.run(Chewy.new, alt_screen: true, bracketed_paste: true)
