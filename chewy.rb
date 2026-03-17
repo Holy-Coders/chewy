@@ -303,6 +303,937 @@ class ModelValidatedMessage < Bubbletea::Message
   def initialize(path:, model_type: nil, error: nil) @path = path; @model_type = model_type; @error = error end
 end
 
+# ---------- Provider Interface ----------
+
+module Provider
+  Capabilities = Struct.new(
+    :negative_prompt, :seed, :batch, :img2img, :live_preview,
+    :cancel, :model_listing, :lora, :cfg_scale, :sampler,
+    :scheduler, :threads, :strength, :width_height,
+    keyword_init: true
+  ) do
+    def initialize(**kwargs)
+      defaults = { negative_prompt: false, seed: false, batch: false, img2img: false,
+                   live_preview: false, cancel: false, model_listing: false, lora: false,
+                   cfg_scale: false, sampler: false, scheduler: false, threads: false,
+                   strength: false, width_height: true }
+      super(**defaults.merge(kwargs))
+    end
+  end
+
+  GenerationRequest = Struct.new(
+    :prompt, :negative_prompt, :model, :steps, :cfg_scale,
+    :width, :height, :seed, :sampler, :scheduler, :batch,
+    :init_image, :strength, :threads, :loras, :output_dir,
+    :is_flux, :flux_clip_l, :flux_t5xxl, :flux_vae,
+    keyword_init: true
+  )
+
+  GenerationResult = Struct.new(:paths, :seeds, :elapsed, :error, keyword_init: true)
+
+  # Where provider API keys are stored (not in config YAML)
+  KEYS_DIR = File.join(CONFIG_DIR, "keys")
+
+  class Base
+    def id; raise NotImplementedError; end
+    def display_name; raise NotImplementedError; end
+    def provider_type; :local; end
+    def capabilities; raise NotImplementedError; end
+    def capabilities_for_model(model_id); capabilities; end
+    def list_models; []; end
+    def generate(request, cancelled: -> { false }, &on_event); raise NotImplementedError; end
+    def cancel(handle); end
+    def needs_api_key?; false; end
+    def api_key_env_var; nil; end
+    def api_key_setup_url; nil; end
+    def api_key_set?; !needs_api_key?; end
+
+    def resolve_api_key
+      return nil unless needs_api_key?
+      # Env var takes priority, then stored key file
+      ENV[api_key_env_var] || load_stored_key
+    end
+
+    def store_api_key(key)
+      FileUtils.mkdir_p(Provider::KEYS_DIR)
+      path = File.join(Provider::KEYS_DIR, "#{id}.key")
+      File.write(path, key)
+      File.chmod(0600, path)
+    rescue => e
+      nil
+    end
+
+    private
+
+    def load_stored_key
+      path = File.join(Provider::KEYS_DIR, "#{id}.key")
+      return nil unless File.exist?(path)
+      key = File.read(path).strip
+      key.empty? ? nil : key
+    rescue
+      nil
+    end
+  end
+end
+
+# ---------- Local sd.cpp Provider ----------
+
+class LocalSdCppProvider < Provider::Base
+  def initialize(sd_bin:, models_dir:, lora_dir:)
+    @sd_bin = sd_bin; @models_dir = models_dir; @lora_dir = lora_dir
+  end
+
+  def id; "local_sd_cpp"; end
+  def display_name; "Local (sd.cpp)"; end
+  def provider_type; :local; end
+
+  def capabilities
+    Provider::Capabilities.new(
+      negative_prompt: true, seed: true, batch: true, img2img: true,
+      live_preview: true, cancel: true, model_listing: true, lora: true,
+      cfg_scale: true, sampler: true, scheduler: true, threads: true,
+      strength: true, width_height: true
+    )
+  end
+
+  def generate(request, cancelled: -> { false }, &on_event)
+    preview_path = File.join(request.output_dir, ".preview_#{Process.pid}.png")
+    timestamp = Time.now.strftime("%Y%m%d_%H%M%S")
+    output_path = File.join(request.output_dir, "#{timestamp}.png")
+
+    on_event&.call(:preview_path, preview_path)
+
+    args = build_command(request, output_path, preview_path)
+
+    start_time = Time.now
+    pty_r, _pty_w, pid = PTY.spawn(*args)
+    on_event&.call(:pid, pid)
+
+    all_output = +""; parsed_seed = nil; sampling_started = false
+    buf = +""; status = nil; batch_seeds = []
+
+    loop do
+      ready = IO.select([pty_r], nil, nil, 0.25)
+      if ready
+        begin
+          chunk = pty_r.readpartial(4096)
+          buf << chunk; all_output << chunk
+          parse_output(buf, sampling_started, parsed_seed, on_event) do |new_buf, ss, ps|
+            if ps && ps != parsed_seed
+              batch_seeds << ps
+              on_event&.call(:batch_progress, batch_seeds.length)
+            end
+            buf = new_buf; sampling_started = ss; parsed_seed = ps
+          end
+        rescue Errno::EIO, EOFError
+          break
+        end
+      end
+      begin
+        _, status = Process.waitpid2(pid, Process::WNOHANG)
+        if status
+          loop do
+            chunk = pty_r.readpartial(4096)
+            all_output << chunk; buf << chunk
+            parse_output(buf, sampling_started, parsed_seed, on_event) do |new_buf, ss, ps|
+              if ps && ps != parsed_seed
+                batch_seeds << ps
+                on_event&.call(:batch_progress, batch_seeds.length)
+              end
+              buf = new_buf; sampling_started = ss; parsed_seed = ps
+            end
+          rescue Errno::EIO, EOFError
+            break
+          end
+          break
+        end
+      rescue Errno::ECHILD
+        break
+      end
+    end
+
+    _, status = Process.wait2(pid) rescue nil unless status
+    pty_r.close rescue nil
+    on_event&.call(:pid, nil)
+    elapsed = (Time.now - start_time).round(1)
+
+    File.delete(preview_path) if File.exist?(preview_path)
+    on_event&.call(:preview_path, nil)
+
+    if cancelled.call || status&.signaled?
+      cleanup_outputs(output_path, request.batch)
+      return Provider::GenerationResult.new(error: "Cancelled")
+    end
+
+    if status&.success? || status.nil?
+      generated = collect_outputs(output_path, request, batch_seeds, parsed_seed)
+      if generated.any?
+        Provider::GenerationResult.new(
+          paths: generated.map(&:first), seeds: generated.map(&:last), elapsed: elapsed
+        )
+      else
+        Provider::GenerationResult.new(error: diagnose_error(all_output, status, request.model))
+      end
+    else
+      Provider::GenerationResult.new(error: diagnose_error(all_output, status, request.model))
+    end
+  rescue Errno::ENOENT
+    on_event&.call(:pid, nil)
+    Provider::GenerationResult.new(error: "Binary '#{@sd_bin}' not found. Set SD_BIN env var.")
+  rescue => e
+    on_event&.call(:pid, nil)
+    Provider::GenerationResult.new(error: e.message)
+  end
+
+  def cancel(pid)
+    Process.kill("TERM", pid) rescue nil
+  end
+
+  private
+
+  def build_command(request, output_path, preview_path)
+    args = if request.is_flux
+      [@sd_bin, "--diffusion-model", request.model,
+       "--clip_l", request.flux_clip_l, "--t5xxl", request.flux_t5xxl, "--vae", request.flux_vae,
+       "-p", request.prompt,
+       "--steps", request.steps.to_s, "--cfg-scale", request.cfg_scale.to_s,
+       "--guidance", "3.5",
+       "-W", request.width.to_s, "-H", request.height.to_s,
+       "--seed", request.seed.to_s, "--sampling-method", request.sampler,
+       "--scheduler", request.scheduler,
+       "-t", request.threads.to_s, "--fa", "--vae-tiling", "--clip-on-cpu",
+       "--cache-mode", "spectrum",
+       "-b", request.batch.to_s,
+       "-o", output_path]
+    else
+      [@sd_bin, "-m", request.model, "-p", request.prompt,
+       "--steps", request.steps.to_s, "--cfg-scale", request.cfg_scale.to_s,
+       "-W", request.width.to_s, "-H", request.height.to_s,
+       "--seed", request.seed.to_s, "--sampling-method", request.sampler,
+       "--scheduler", request.scheduler,
+       "-t", request.threads.to_s, "--fa", "--vae-tiling", "--clip-on-cpu",
+       "--cache-mode", "spectrum",
+       "-b", request.batch.to_s,
+       "-o", output_path]
+    end
+    args += ["--preview", "proj", "--preview-path", preview_path, "--preview-interval", "1"]
+    args += ["--negative-prompt", request.negative_prompt] unless request.negative_prompt.empty?
+    args += ["--lora-model-dir", @lora_dir] if request.loras&.any? && !request.is_flux
+    if request.init_image
+      args += ["--init-img", request.init_image, "--strength", request.strength.to_s]
+    end
+    args
+  end
+
+  def parse_output(buf, sampling_started, parsed_seed, on_event)
+    clean = buf.gsub(/\e\[[0-9;]*[A-Za-z]/, "")
+    segments = clean.split(/[\r\n]+/)
+    new_buf = clean.end_with?("\r", "\n") ? +"" : (segments.pop || +"")
+    segments.each do |seg|
+      stripped = seg.strip
+      next if stripped.empty?
+      if seg =~ /\[INFO\s*\]\s*\S+\s*-\s*(.+)/
+        info = $1.strip
+        if info =~ /loading model/i
+          on_event&.call(:status, "Loading model...")
+        elsif info =~ /load .+ using (\w+)/i
+          on_event&.call(:status, "Loading (#{$1})...")
+        elsif info =~ /Version:\s*(.+)/
+          on_event&.call(:status, "Model: #{$1.strip}")
+        elsif info =~ /total params memory size\s*=\s*([\d.]+\s*\w+)/
+          on_event&.call(:status, "Model loaded (#{$1})")
+        elsif info =~ /sampling using (.+) method/i
+          on_event&.call(:status, "Sampler: #{$1}")
+        elsif info =~ /generating image.*seed\s+(\d+)/i
+          parsed_seed = $1.to_i
+          sampling_started = true
+          on_event&.call(:sampling_start, nil)
+          on_event&.call(:status, "Sampling (seed #{$1})...")
+        elsif info =~ /sampling completed/i
+          on_event&.call(:status, "Decoding latents...")
+        elsif info =~ /save result/i
+          on_event&.call(:status, "Saving image...")
+        end
+      end
+      if !sampling_started && seg =~ /seed\s+(\d+)/i
+        parsed_seed = $1.to_i
+        sampling_started = true
+        on_event&.call(:sampling_start, nil)
+      end
+      if sampling_started && seg =~ /(\d+)\s*\/\s*(\d+)\s*-\s*([\d.]+)\s*(s\/it|it\/s)/
+        step = $1.to_i; total = $2.to_i
+        speed_val = $3.to_f
+        sps = $4 == "s/it" ? speed_val : (speed_val > 0 ? 1.0 / speed_val : 0)
+        on_event&.call(:progress, { step: step, total: total, secs_per_step: sps })
+      end
+    end
+    yield new_buf, sampling_started, parsed_seed
+  end
+
+  def collect_outputs(output_path, request, batch_seeds, parsed_seed)
+    generated = []
+    if request.batch > 1
+      base = output_path.sub(/\.png$/, "")
+      request.batch.times do |i|
+        f = "#{base}_#{i}.png"
+        next unless File.exist?(f) && File.size(f) > 0
+        ts = Time.now.strftime("%Y%m%d_%H%M%S_%L") + "_#{i}"
+        final = File.join(request.output_dir, "#{ts}.png")
+        File.rename(f, final)
+        generated << [final, batch_seeds[i] || (request.seed == -1 ? nil : request.seed + i)]
+      end
+    else
+      if File.exist?(output_path) && File.size(output_path) > 0
+        generated << [output_path, parsed_seed || request.seed]
+      end
+    end
+    generated
+  end
+
+  def cleanup_outputs(output_path, batch_count)
+    if batch_count > 1
+      batch_count.times { |i| File.delete("#{output_path.sub(/\.png$/, "")}_#{i}.png") rescue nil }
+    else
+      File.delete(output_path) rescue nil
+    end
+  end
+
+  def diagnose_error(all_output, status, model)
+    exit_code = status&.exitstatus || "unknown"
+    last_line = all_output.lines.last&.strip || "unknown"
+    if all_output.include?("get sd version from file failed") || all_output.include?("new_sd_ctx_t failed")
+      name = File.basename(model)
+      "\"#{name}\" is not a supported diffusion model — try a different model"
+    elsif all_output.include?("out of memory") || all_output.include?("GGML_ASSERT")
+      "Not enough memory for this model — try a smaller/quantized version"
+    else
+      "Failed (exit #{exit_code}): #{last_line}"
+    end
+  end
+end
+
+# ---------- OpenAI Images Provider ----------
+
+class OpenAIImagesProvider < Provider::Base
+  MODELS = [
+    { id: "gpt-image-1", name: "GPT Image 1", desc: "Latest OpenAI image model" },
+    { id: "dall-e-3", name: "DALL-E 3", desc: "High quality, creative" },
+    { id: "dall-e-2", name: "DALL-E 2", desc: "Fast, lower cost" },
+  ].freeze
+
+  SIZES = {
+    "gpt-image-1" => %w[1024x1024 1024x1536 1536x1024 auto],
+    "dall-e-3"    => %w[1024x1024 1024x1792 1792x1024],
+    "dall-e-2"    => %w[256x256 512x512 1024x1024],
+  }.freeze
+
+  def id; "openai"; end
+  def display_name; "OpenAI"; end
+  def provider_type; :api; end
+
+  def capabilities
+    Provider::Capabilities.new(
+      negative_prompt: false, seed: false, batch: true, img2img: false,
+      live_preview: false, cancel: false, model_listing: true, lora: false,
+      cfg_scale: false, sampler: false, scheduler: false, threads: false,
+      strength: false, width_height: true
+    )
+  end
+
+  def needs_api_key?; true; end
+  def api_key_env_var; "OPENAI_API_KEY"; end
+  def api_key_setup_url; "platform.openai.com/api-keys"; end
+  def api_key_set?; !!resolve_api_key; end
+
+  def list_models; MODELS; end
+
+  def generate(request, cancelled: -> { false }, &on_event)
+    api_key = resolve_api_key
+    return Provider::GenerationResult.new(error: "OPENAI_API_KEY not set") unless api_key
+
+    on_event&.call(:status, "Sending request to OpenAI...")
+
+    model = request.model || "gpt-image-1"
+    size = nearest_size(model, request.width, request.height)
+    n = [request.batch || 1, 1].max
+
+    # Normalize model — may come from another provider's selection
+    model = "gpt-image-1" unless MODELS.any? { |m| m[:id] == model }
+
+    body = { model: model, prompt: request.prompt, n: n, size: size }
+
+    case model
+    when "gpt-image-1"
+      body[:quality] = request.steps && request.steps >= 20 ? "high" : "auto"
+      body[:output_format] = "png"
+    when "dall-e-3"
+      body[:quality] = request.steps && request.steps >= 20 ? "hd" : "standard"
+      body[:response_format] = "b64_json"
+      body[:n] = 1  # dall-e-3 only supports n=1
+    when "dall-e-2"
+      body[:response_format] = "b64_json"
+    end
+
+    uri = URI.parse("https://api.openai.com/v1/images/generations")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.open_timeout = 30
+    http.read_timeout = 300
+
+    req = Net::HTTP::Post.new(uri)
+    req["Authorization"] = "Bearer #{api_key}"
+    req["Content-Type"] = "application/json"
+    req.body = JSON.generate(body)
+
+    on_event&.call(:status, "Generating with #{model}...")
+    start_time = Time.now
+    resp = http.request(req)
+    elapsed = (Time.now - start_time).round(1)
+
+    unless resp.is_a?(Net::HTTPSuccess)
+      error_body = JSON.parse(resp.body) rescue {}
+      error_msg = error_body.dig("error", "message") || "HTTP #{resp.code}: #{resp.message}"
+      return Provider::GenerationResult.new(error: "OpenAI: #{error_msg}")
+    end
+
+    data = JSON.parse(resp.body)
+    images = data["data"] || []
+    return Provider::GenerationResult.new(error: "No images returned") if images.empty?
+
+    on_event&.call(:status, "Saving images...")
+    FileUtils.mkdir_p(request.output_dir)
+
+    paths = []
+    images.each_with_index do |img, i|
+      timestamp = Time.now.strftime("%Y%m%d_%H%M%S_%L")
+      output_path = File.join(request.output_dir, "#{timestamp}_#{i}.png")
+
+      if img["b64_json"]
+        File.binwrite(output_path, Base64.decode64(img["b64_json"]))
+        paths << output_path
+      elsif img["url"]
+        img_uri = URI.parse(img["url"])
+        img_http = Net::HTTP.new(img_uri.host, img_uri.port)
+        img_http.use_ssl = (img_uri.scheme == "https")
+        img_resp = img_http.request(Net::HTTP::Get.new(img_uri))
+        if img_resp.is_a?(Net::HTTPSuccess)
+          File.binwrite(output_path, img_resp.body)
+          paths << output_path
+        end
+      end
+    end
+
+    return Provider::GenerationResult.new(error: "Failed to save images") if paths.empty?
+
+    Provider::GenerationResult.new(paths: paths, seeds: [nil] * paths.length, elapsed: elapsed)
+  rescue => e
+    Provider::GenerationResult.new(error: "OpenAI: #{e.message}")
+  end
+
+  private
+
+  def nearest_size(model, w, h)
+    valid = SIZES[model] || SIZES["gpt-image-1"]
+    concrete = valid.reject { |s| s == "auto" }
+    return valid.first if concrete.empty?
+
+    aspect = w.to_f / h
+    concrete.min_by do |s|
+      sw, sh = s.split("x").map(&:to_i)
+      (aspect - sw.to_f / sh).abs
+    end
+  end
+end
+
+# ---------- Fireworks Provider ----------
+
+class FireworksProvider < Provider::Base
+  MODELS = [
+    { id: "accounts/fireworks/models/flux-1-schnell-fp8", name: "FLUX.1 Schnell", desc: "Fast, 1-4 steps", type: :flux },
+    { id: "accounts/fireworks/models/flux-1-dev-fp8", name: "FLUX.1 Dev", desc: "Quality, 20-30 steps", type: :flux },
+    { id: "accounts/fireworks/models/flux-1.1-pro", name: "FLUX 1.1 Pro", desc: "Highest quality", type: :flux },
+    { id: "accounts/fireworks/models/stable-diffusion-xl-1024-v1-0", name: "SDXL 1.0", desc: "Stable Diffusion XL", type: :sdxl },
+    { id: "accounts/fireworks/models/playground-v2-5-1024px-aesthetic", name: "Playground v2.5", desc: "Aesthetic, 1024px", type: :sdxl },
+  ].freeze
+
+  def id; "fireworks"; end
+  def display_name; "Fireworks"; end
+  def provider_type; :api; end
+
+  def capabilities
+    Provider::Capabilities.new(
+      negative_prompt: false, seed: false, batch: true, img2img: false,
+      live_preview: false, cancel: false, model_listing: true, lora: false,
+      cfg_scale: false, sampler: false, scheduler: false, threads: false,
+      strength: false, width_height: true
+    )
+  end
+
+  def needs_api_key?; true; end
+  def api_key_env_var; "FIREWORKS_API_KEY"; end
+  def api_key_setup_url; "fireworks.ai/api-keys"; end
+  def api_key_set?; !!resolve_api_key; end
+
+  def list_models; MODELS; end
+
+  def generate(request, cancelled: -> { false }, &on_event)
+    api_key = resolve_api_key
+    return Provider::GenerationResult.new(error: "FIREWORKS_API_KEY not set") unless api_key
+
+    model_id = request.model || MODELS.first[:id]
+    model_info = MODELS.find { |m| m[:id] == model_id }
+    is_flux = model_info&.dig(:type) == :flux
+
+    on_event&.call(:status, "Sending request to Fireworks...")
+
+    w = (request.width / 8.0).round * 8
+    h = (request.height / 8.0).round * 8
+
+    body = { prompt: request.prompt, width: w, height: h }
+    if is_flux
+      body[:cfg_scale] = 0
+      body[:steps] = [request.steps || 4, 1].max
+    else
+      body[:cfg_scale] = request.cfg_scale || 7.0
+      body[:steps] = [request.steps || 20, 1].max
+      neg = request.negative_prompt.to_s.strip
+      body[:negative_prompt] = neg unless neg.empty?
+    end
+
+    uri = URI.parse("https://api.fireworks.ai/inference/v1/image_generation/#{model_id}")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.open_timeout = 30
+    http.read_timeout = 300
+
+    req = Net::HTTP::Post.new(uri)
+    req["Authorization"] = "Bearer #{api_key}"
+    req["Content-Type"] = "application/json"
+    req["Accept"] = "image/png"
+    req.body = JSON.generate(body)
+
+    model_name = model_info&.dig(:name) || model_id.split("/").last
+    on_event&.call(:status, "Generating with #{model_name}...")
+
+    start_time = Time.now
+    resp = http.request(req)
+    elapsed = (Time.now - start_time).round(1)
+
+    unless resp.is_a?(Net::HTTPSuccess)
+      error_body = JSON.parse(resp.body) rescue {}
+      error_msg = error_body.dig("error", "message") || error_body["message"] || resp.body[0, 200]
+      return Provider::GenerationResult.new(error: "Fireworks: #{error_msg}")
+    end
+
+    on_event&.call(:status, "Saving image...")
+    FileUtils.mkdir_p(request.output_dir)
+
+    timestamp = Time.now.strftime("%Y%m%d_%H%M%S_%L")
+    output_path = File.join(request.output_dir, "#{timestamp}_0.png")
+    File.binwrite(output_path, resp.body)
+
+    Provider::GenerationResult.new(paths: [output_path], seeds: [nil], elapsed: elapsed)
+  rescue => e
+    Provider::GenerationResult.new(error: "Fireworks: #{e.message}")
+  end
+end
+
+# ---------- HuggingFace Inference Provider ----------
+
+class HuggingFaceInferenceProvider < Provider::Base
+  MODELS = [
+    { id: "black-forest-labs/FLUX.1-schnell", name: "FLUX.1 Schnell", desc: "Fast, 1-4 steps" },
+    { id: "black-forest-labs/FLUX.1-dev", name: "FLUX.1 Dev", desc: "High quality FLUX" },
+    { id: "stabilityai/stable-diffusion-xl-base-1.0", name: "SDXL 1.0", desc: "Stable Diffusion XL" },
+    { id: "stabilityai/stable-diffusion-3.5-large", name: "SD 3.5 Large", desc: "Latest SD architecture" },
+    { id: "HiDream-ai/HiDream-I1-Full", name: "HiDream I1", desc: "High detail generation" },
+  ].freeze
+
+  BASE_URL = "https://router.huggingface.co/hf-inference/models".freeze
+
+  def id; "huggingface"; end
+  def display_name; "HuggingFace"; end
+  def provider_type; :api; end
+
+  def capabilities
+    Provider::Capabilities.new(
+      negative_prompt: true, seed: true, batch: false, img2img: false,
+      live_preview: false, cancel: false, model_listing: true, lora: false,
+      cfg_scale: true, sampler: false, scheduler: false, threads: false,
+      strength: false, width_height: true
+    )
+  end
+
+  def needs_api_key?; true; end
+  def api_key_env_var; "HF_TOKEN"; end
+  def api_key_setup_url; "huggingface.co/settings/tokens"; end
+  def api_key_set?; !!resolve_api_key; end
+
+  def resolve_api_key
+    # Check env vars and standard HF token paths
+    ENV["HF_TOKEN"] || ENV["HUGGING_FACE_HUB_TOKEN"] ||
+      [File.expand_path("~/.cache/huggingface/token"),
+       File.expand_path("~/.huggingface/token")].filter_map { |p|
+        File.read(p).strip if File.exist?(p)
+      }.first || load_stored_key
+  end
+
+  def store_api_key(key)
+    # Store in standard HF location so it works for companion downloads too
+    dir = File.expand_path("~/.cache/huggingface")
+    FileUtils.mkdir_p(dir)
+    path = File.join(dir, "token")
+    File.write(path, key)
+    File.chmod(0600, path)
+  rescue
+    super(key)  # fall back to keys dir
+  end
+
+  def list_models; MODELS; end
+
+  def generate(request, cancelled: -> { false }, &on_event)
+    api_key = resolve_api_key
+    return Provider::GenerationResult.new(error: "HF_TOKEN not set") unless api_key
+
+    model_id = request.model || MODELS.first[:id]
+    on_event&.call(:status, "Sending request to HuggingFace...")
+
+    body = { inputs: request.prompt }
+    params = {}
+    neg = request.negative_prompt.to_s.strip
+    params[:negative_prompt] = neg unless neg.empty?
+    params[:guidance_scale] = request.cfg_scale if request.cfg_scale
+    params[:num_inference_steps] = request.steps if request.steps
+    params[:width] = request.width if request.width
+    params[:height] = request.height if request.height
+    params[:seed] = request.seed if request.seed && request.seed >= 0
+    body[:parameters] = params unless params.empty?
+
+    uri = URI.parse("#{BASE_URL}/#{model_id}")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.open_timeout = 30
+    http.read_timeout = 300
+
+    req = Net::HTTP::Post.new(uri)
+    req["Authorization"] = "Bearer #{api_key}"
+    req["Content-Type"] = "application/json"
+    req.body = JSON.generate(body)
+
+    model_name = MODELS.find { |m| m[:id] == model_id }&.dig(:name) || model_id.split("/").last
+    on_event&.call(:status, "Generating with #{model_name}...")
+
+    start_time = Time.now
+    resp = http.request(req)
+    elapsed = (Time.now - start_time).round(1)
+
+    unless resp.is_a?(Net::HTTPSuccess)
+      error_body = JSON.parse(resp.body) rescue {}
+      error_msg = error_body["error"] || "HTTP #{resp.code}: #{resp.message}"
+      if resp.code == "401"
+        error_msg = "Token invalid or missing inference permission — create a new token at huggingface.co/settings/tokens with 'Make calls to Inference Providers' enabled"
+      elsif resp.code == "503"
+        error_msg = "Model is loading, try again in a moment"
+      end
+      return Provider::GenerationResult.new(error: "HuggingFace: #{error_msg}")
+    end
+
+    on_event&.call(:status, "Saving image...")
+    FileUtils.mkdir_p(request.output_dir)
+
+    content_type = resp["content-type"].to_s
+    timestamp = Time.now.strftime("%Y%m%d_%H%M%S_%L")
+    output_path = File.join(request.output_dir, "#{timestamp}_0.png")
+
+    if content_type.include?("image/")
+      # Binary image response (standard for inference API)
+      File.binwrite(output_path, resp.body)
+    else
+      # JSON response (might have base64)
+      data = JSON.parse(resp.body) rescue nil
+      if data.is_a?(Array) && data.first&.dig("blob")
+        File.binwrite(output_path, Base64.decode64(data.first["blob"]))
+      elsif data.is_a?(Hash) && data["b64_json"]
+        File.binwrite(output_path, Base64.decode64(data["b64_json"]))
+      else
+        return Provider::GenerationResult.new(error: "Unexpected response format")
+      end
+    end
+
+    seed_val = request.seed && request.seed >= 0 ? request.seed : nil
+    Provider::GenerationResult.new(paths: [output_path], seeds: [seed_val], elapsed: elapsed)
+  rescue => e
+    Provider::GenerationResult.new(error: "HuggingFace: #{e.message}")
+  end
+end
+
+# ---------- Gemini Provider ----------
+
+class GeminiProvider < Provider::Base
+  MODELS = [
+    { id: "imagen-3.0-generate-002", name: "Imagen 3", desc: "Google's best image model" },
+    { id: "imagen-3.0-fast-generate-001", name: "Imagen 3 Fast", desc: "Faster, lower cost" },
+    { id: "gemini-2.0-flash-exp", name: "Gemini 2.0 Flash", desc: "Native Gemini image gen" },
+  ].freeze
+
+  def id; "gemini"; end
+  def display_name; "Gemini"; end
+  def provider_type; :api; end
+
+  def capabilities
+    Provider::Capabilities.new(
+      negative_prompt: true, seed: false, batch: true, img2img: false,
+      live_preview: false, cancel: false, model_listing: true, lora: false,
+      cfg_scale: false, sampler: false, scheduler: false, threads: false,
+      strength: false, width_height: true
+    )
+  end
+
+  def needs_api_key?; true; end
+  def api_key_env_var; "GEMINI_API_KEY"; end
+  def api_key_setup_url; "aistudio.google.com/apikey"; end
+  def api_key_set?; !!resolve_api_key; end
+
+  def list_models; MODELS; end
+
+  def generate(request, cancelled: -> { false }, &on_event)
+    api_key = resolve_api_key
+    return Provider::GenerationResult.new(error: "GEMINI_API_KEY not set") unless api_key
+
+    model_id = request.model || MODELS.first[:id]
+    on_event&.call(:status, "Sending request to Gemini...")
+
+    is_imagen = model_id.start_with?("imagen")
+    n = [request.batch || 1, 1].max
+
+    if is_imagen
+      result = generate_imagen(api_key, model_id, request, n, on_event)
+    else
+      result = generate_gemini_native(api_key, model_id, request, on_event)
+    end
+    result
+  rescue => e
+    Provider::GenerationResult.new(error: "Gemini: #{e.message}")
+  end
+
+  private
+
+  def generate_imagen(api_key, model_id, request, n, on_event)
+    uri = URI.parse("https://generativelanguage.googleapis.com/v1beta/models/#{model_id}:predict?key=#{api_key}")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.open_timeout = 30
+    http.read_timeout = 300
+
+    body = {
+      instances: [{ prompt: request.prompt }],
+      parameters: {
+        sampleCount: [n, 4].min,
+        aspectRatio: nearest_aspect(request.width, request.height),
+      },
+    }
+    neg = request.negative_prompt.to_s.strip
+    body[:parameters][:negativePrompt] = neg unless neg.empty?
+
+    req = Net::HTTP::Post.new(uri)
+    req["Content-Type"] = "application/json"
+    req.body = JSON.generate(body)
+
+    model_name = MODELS.find { |m| m[:id] == model_id }&.dig(:name) || model_id
+    on_event&.call(:status, "Generating with #{model_name}...")
+
+    start_time = Time.now
+    resp = http.request(req)
+    elapsed = (Time.now - start_time).round(1)
+
+    unless resp.is_a?(Net::HTTPSuccess)
+      error_body = JSON.parse(resp.body) rescue {}
+      error_msg = error_body.dig("error", "message") || "HTTP #{resp.code}: #{resp.message}"
+      return Provider::GenerationResult.new(error: "Gemini: #{error_msg}")
+    end
+
+    data = JSON.parse(resp.body)
+    predictions = data["predictions"] || []
+    return Provider::GenerationResult.new(error: "No images returned") if predictions.empty?
+
+    on_event&.call(:status, "Saving images...")
+    FileUtils.mkdir_p(request.output_dir)
+
+    paths = []
+    predictions.each_with_index do |pred, i|
+      b64 = pred["bytesBase64Encoded"]
+      next unless b64
+      timestamp = Time.now.strftime("%Y%m%d_%H%M%S_%L")
+      output_path = File.join(request.output_dir, "#{timestamp}_#{i}.png")
+      File.binwrite(output_path, Base64.decode64(b64))
+      paths << output_path
+    end
+
+    return Provider::GenerationResult.new(error: "Failed to save images") if paths.empty?
+    Provider::GenerationResult.new(paths: paths, seeds: [nil] * paths.length, elapsed: elapsed)
+  end
+
+  def generate_gemini_native(api_key, model_id, request, on_event)
+    uri = URI.parse("https://generativelanguage.googleapis.com/v1beta/models/#{model_id}:generateContent?key=#{api_key}")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.open_timeout = 30
+    http.read_timeout = 300
+
+    body = {
+      contents: [{ parts: [{ text: request.prompt }] }],
+      generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+    }
+
+    req = Net::HTTP::Post.new(uri)
+    req["Content-Type"] = "application/json"
+    req.body = JSON.generate(body)
+
+    model_name = MODELS.find { |m| m[:id] == model_id }&.dig(:name) || model_id
+    on_event&.call(:status, "Generating with #{model_name}...")
+
+    start_time = Time.now
+    resp = http.request(req)
+    elapsed = (Time.now - start_time).round(1)
+
+    unless resp.is_a?(Net::HTTPSuccess)
+      error_body = JSON.parse(resp.body) rescue {}
+      error_msg = error_body.dig("error", "message") || "HTTP #{resp.code}: #{resp.message}"
+      return Provider::GenerationResult.new(error: "Gemini: #{error_msg}")
+    end
+
+    data = JSON.parse(resp.body)
+    parts = data.dig("candidates", 0, "content", "parts") || []
+    image_parts = parts.select { |p| p.dig("inlineData", "mimeType")&.start_with?("image/") }
+    return Provider::GenerationResult.new(error: "No images in response") if image_parts.empty?
+
+    on_event&.call(:status, "Saving images...")
+    FileUtils.mkdir_p(request.output_dir)
+
+    paths = []
+    image_parts.each_with_index do |part, i|
+      b64 = part.dig("inlineData", "data")
+      next unless b64
+      timestamp = Time.now.strftime("%Y%m%d_%H%M%S_%L")
+      output_path = File.join(request.output_dir, "#{timestamp}_#{i}.png")
+      File.binwrite(output_path, Base64.decode64(b64))
+      paths << output_path
+    end
+
+    return Provider::GenerationResult.new(error: "Failed to save images") if paths.empty?
+    Provider::GenerationResult.new(paths: paths, seeds: [nil] * paths.length, elapsed: elapsed)
+  end
+
+  def nearest_aspect(w, h)
+    aspect = w.to_f / h
+    aspects = { "1:1" => 1.0, "3:4" => 0.75, "4:3" => 1.333, "9:16" => 0.5625, "16:9" => 1.778 }
+    aspects.min_by { |_, v| (aspect - v).abs }.first
+  end
+end
+
+# ---------- OpenAI-Compatible Provider ----------
+
+class OpenAICompatibleProvider < Provider::Base
+  def initialize(config = {})
+    @base_url = config["base_url"] || "http://localhost:8080/v1"
+    @display = config["name"] || "OpenAI-Compatible"
+    @env_var = config["api_key_env"] || "OPENAI_COMPAT_API_KEY"
+    @setup_url = config["setup_url"]
+    @configured_models = (config["models"] || []).map { |m|
+      { id: m["id"] || m, name: m["name"] || m["id"] || m, desc: m["desc"] || "" }
+    }
+  end
+
+  def id; "openai_compat"; end
+  def display_name; @display; end
+  def provider_type; :api; end
+
+  def capabilities
+    Provider::Capabilities.new(
+      negative_prompt: false, seed: false, batch: true, img2img: false,
+      live_preview: false, cancel: false, model_listing: true, lora: false,
+      cfg_scale: false, sampler: false, scheduler: false, threads: false,
+      strength: false, width_height: true
+    )
+  end
+
+  def needs_api_key?; true; end
+  def api_key_env_var; @env_var; end
+  def api_key_setup_url; @setup_url; end
+  def api_key_set?; !!resolve_api_key; end
+
+  def list_models
+    return @configured_models unless @configured_models.empty?
+    [{ id: "default", name: "Default", desc: @base_url }]
+  end
+
+  def generate(request, cancelled: -> { false }, &on_event)
+    api_key = resolve_api_key
+    return Provider::GenerationResult.new(error: "#{@env_var} not set") unless api_key
+
+    on_event&.call(:status, "Sending request...")
+
+    model = request.model || list_models.first[:id]
+    n = [request.batch || 1, 1].max
+
+    body = { model: model, prompt: request.prompt, n: n, size: "#{request.width}x#{request.height}" }
+    body[:response_format] = "b64_json"
+
+    uri = URI.parse("#{@base_url}/images/generations")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = (uri.scheme == "https")
+    http.open_timeout = 30
+    http.read_timeout = 300
+
+    req = Net::HTTP::Post.new(uri)
+    req["Authorization"] = "Bearer #{api_key}"
+    req["Content-Type"] = "application/json"
+    req.body = JSON.generate(body)
+
+    on_event&.call(:status, "Generating...")
+    start_time = Time.now
+    resp = http.request(req)
+    elapsed = (Time.now - start_time).round(1)
+
+    unless resp.is_a?(Net::HTTPSuccess)
+      error_body = JSON.parse(resp.body) rescue {}
+      error_msg = error_body.dig("error", "message") || "HTTP #{resp.code}: #{resp.message}"
+      return Provider::GenerationResult.new(error: error_msg)
+    end
+
+    data = JSON.parse(resp.body)
+    images = data["data"] || []
+    return Provider::GenerationResult.new(error: "No images returned") if images.empty?
+
+    on_event&.call(:status, "Saving images...")
+    FileUtils.mkdir_p(request.output_dir)
+
+    paths = []
+    images.each_with_index do |img, i|
+      timestamp = Time.now.strftime("%Y%m%d_%H%M%S_%L")
+      output_path = File.join(request.output_dir, "#{timestamp}_#{i}.png")
+      if img["b64_json"]
+        File.binwrite(output_path, Base64.decode64(img["b64_json"]))
+        paths << output_path
+      elsif img["url"]
+        img_uri = URI.parse(img["url"])
+        img_http = Net::HTTP.new(img_uri.host, img_uri.port)
+        img_http.use_ssl = (img_uri.scheme == "https")
+        img_resp = img_http.request(Net::HTTP::Get.new(img_uri))
+        if img_resp.is_a?(Net::HTTPSuccess)
+          File.binwrite(output_path, img_resp.body)
+          paths << output_path
+        end
+      end
+    end
+
+    return Provider::GenerationResult.new(error: "Failed to save images") if paths.empty?
+    Provider::GenerationResult.new(paths: paths, seeds: [nil] * paths.length, elapsed: elapsed)
+  rescue => e
+    Provider::GenerationResult.new(error: e.message)
+  end
+end
+
 # ---------- Main App ----------
 
 class Chewy
@@ -390,7 +1321,15 @@ class Chewy
     @output_dir = ENV["CHEWY_OUTPUT_DIR"] || @config["output_dir"] || "outputs"
     @lora_dir = ENV["CHEWY_LORA_DIR"] || @config["lora_dir"] || File.expand_path("~/loras")
 
-    # Overlay: nil, :models, :download, :history, :lora, :preset, :hf_token, :gallery, :fullscreen_image, :file_picker, :theme
+    # Providers
+    @providers = build_providers
+    @active_provider_id = @config["active_provider"] || "local_sd_cpp"
+    @provider = @providers.find { |p| p.id == @active_provider_id } || @providers.first
+    @provider_index = @providers.index(@provider) || 0
+    @remote_model_id = @config["remote_model"] || nil
+    @remote_model_index = 0
+
+    # Overlay: nil, :models, :download, :history, :lora, :preset, :hf_token, :gallery, :fullscreen_image, :file_picker, :theme, :provider
     @overlay = nil
 
     # img2img
@@ -415,6 +1354,13 @@ class Chewy
     @hf_token_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
     @hf_token_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
     @hf_token_pending_action = nil
+
+    # API key input (for remote providers)
+    @api_key_input = Bubbles::TextInput.new
+    @api_key_input.placeholder = "Paste your API key..."
+    @api_key_input.prompt = ""
+    @api_key_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
+    @api_key_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
 
     # Image preview cache
     @preview_cache = nil
@@ -510,6 +1456,8 @@ class Chewy
       "incompatible_models" => @incompatible_models || [],
       "model_types" => @model_types || {},
       "theme" => Theme.current_name,
+      "active_provider" => @provider&.id || "local_sd_cpp",
+      "remote_model" => @remote_model_id,
     }
     @config = data
     File.write(CONFIG_PATH, YAML.dump(data))
@@ -529,6 +1477,38 @@ class Chewy
     File.write(PRESETS_PATH, YAML.dump(@user_presets))
   rescue
     nil
+  end
+
+  def build_providers
+    providers = [
+      LocalSdCppProvider.new(sd_bin: @sd_bin, models_dir: @models_dir, lora_dir: @lora_dir),
+      OpenAIImagesProvider.new,
+      FireworksProvider.new,
+      GeminiProvider.new,
+      HuggingFaceInferenceProvider.new,
+    ]
+    # Add user-configured OpenAI-compatible endpoint if present
+    if (compat_cfg = @config["openai_compatible"])
+      providers << OpenAICompatibleProvider.new(compat_cfg)
+    end
+    providers
+  end
+
+  def update_param_keys
+    model_id = @provider.provider_type == :api ? @remote_model_id : nil
+    caps = model_id ? @provider.capabilities_for_model(model_id) : @provider.capabilities
+    keys = []
+    keys << :steps if caps.sampler || caps.cfg_scale
+    keys << :cfg_scale if caps.cfg_scale
+    keys << :width << :height if caps.width_height
+    keys << :seed if caps.seed
+    keys << :sampler if caps.sampler
+    keys << :scheduler if caps.scheduler
+    keys << :batch if caps.batch
+    keys << :strength if caps.strength
+    keys << :threads if caps.threads
+    @param_display_keys = keys
+    @param_index = [[@param_index, keys.length - 1].min, 0].max
   end
 
   # ========== Init ==========
@@ -643,6 +1623,8 @@ class Chewy
       when :fullscreen_image then render_fullscreen_image
       when :file_picker then render_overlay_panel("Select Image", render_file_picker_content, render_file_picker_status)
       when :theme then render_overlay_panel("Theme", render_theme_content, render_theme_status)
+      when :provider then render_overlay_panel("Provider", render_provider_content, render_provider_status)
+      when :api_key then render_overlay_panel("API Key", render_api_key_content, render_api_key_status)
       else render_main_view
       end
     end
@@ -671,7 +1653,7 @@ class Chewy
     text_fg = Lipgloss::Style.new.foreground(Theme.TEXT)
     text_dim_fg = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
 
-    [@prompt_input, @hf_token_input, @download_search_input].each do |input|
+    [@prompt_input, @hf_token_input, @download_search_input, @api_key_input].each do |input|
       input.placeholder_style = placeholder
       input.text_style = text_fg
       input.cursor.style = cur_style
@@ -992,7 +1974,8 @@ class Chewy
       unless @focus == FOCUS_PROMPT || @focus == FOCUS_NEGATIVE
         @init_image_path = nil; @status_message = "Init image cleared"; return [self, nil]
       end
-    when "ctrl+x" then if @generating && @gen_pid; @gen_cancelled = true; Process.kill("TERM", @gen_pid) rescue nil; end; return [self, nil]
+    when "ctrl+x" then if @generating; @gen_cancelled = true; @provider.cancel(@gen_pid) if @provider.capabilities.cancel && @gen_pid; end; return [self, nil]
+    when "ctrl+y" then return toggle_overlay(:provider)
     when "tab"    then cycle_focus; return [self, nil]
     when "shift+tab" then cycle_focus(reverse: true); return [self, nil]
     end
@@ -1278,258 +2261,120 @@ class Chewy
     if prompt_text.empty?
       @error_message = "Prompt cannot be empty"; return [self, nil]
     end
-    unless @selected_model_path
-      @error_message = "No model selected"; return [self, nil]
-    end
-    return [self, nil] if @generating
 
-    # FLUX: check companion files first
-    if flux_model?(@selected_model_path) && !flux_companions_present?
-      return download_flux_companions
+    # Local provider needs a model file; remote providers use @remote_model_id
+    if @provider.provider_type == :local
+      unless @selected_model_path
+        @error_message = "No model selected"; return [self, nil]
+      end
+      if flux_model?(@selected_model_path) && !flux_companions_present?
+        return download_flux_companions
+      end
+    elsif @provider.needs_api_key? && !@provider.api_key_set?
+      return open_overlay(:api_key)
     end
+
+    return [self, nil] if @generating
 
     @generating = true
     @gen_cancelled = false
     @gen_step = 0; @gen_total_steps = 0; @gen_status = "Starting..."
     @gen_start_time = Time.now; @gen_sampling_start = nil; @gen_secs_per_step = nil
-    @reveal_phase = nil; @reveal_path = nil  # cancel any in-progress reveal
+    @reveal_phase = nil; @reveal_path = nil
     @gen_current_batch = 0
     @gen_total_batch = @params[:batch]
     @last_seed = nil
     @error_message = nil; @status_message = nil
 
     add_to_prompt_history(prompt_text)
-    add_recent_model(@selected_model_path)
+    add_recent_model(@selected_model_path) if @selected_model_path
 
     full_prompt = prompt_text
-    if @selected_loras.any?
+    if @selected_loras.any? && @provider.capabilities.lora
       tags = @selected_loras.map { |l| "<lora:#{l[:name]}:#{l[:weight]}>" }
       full_prompt = "#{prompt_text} #{tags.join(' ')}"
     end
 
     FileUtils.mkdir_p(@output_dir)
 
-    # Capture for thread safety
-    sd_bin = @sd_bin; model = @selected_model_path
-    prompt = full_prompt; negative = negative_text
-    steps = @params[:steps]; cfg = @params[:cfg_scale]
-    w = @params[:width]; h = @params[:height]
-    base_seed = @params[:seed]; sampler = @sampler; scheduler = @scheduler
-    output_dir = @output_dir; batch_count = @params[:batch]
-    lora_dir = @lora_dir; has_loras = @selected_loras.any?
-    is_flux = flux_model?(model)
-    flux_clip_l = flux_companion_path("clip_l")
-    flux_t5xxl = flux_companion_path("t5xxl")
-    flux_vae = flux_companion_path("vae")
-    init_img = @init_image_path
-    strength = @params[:strength]
-    threads = @params[:threads]
+    # Build provider-agnostic request
+    model = if @provider.provider_type == :local
+      @selected_model_path
+    else
+      @remote_model_id || @provider.list_models.first&.dig(:id)
+    end
+    is_flux = @provider.provider_type == :local && @selected_model_path && flux_model?(@selected_model_path)
+
+    request = Provider::GenerationRequest.new(
+      prompt: full_prompt, negative_prompt: negative_text,
+      model: model, steps: @params[:steps], cfg_scale: @params[:cfg_scale],
+      width: @params[:width], height: @params[:height],
+      seed: @params[:seed], sampler: @sampler, scheduler: @scheduler,
+      batch: @params[:batch], init_image: @init_image_path,
+      strength: @params[:strength], threads: @params[:threads],
+      loras: @selected_loras, output_dir: @output_dir,
+      is_flux: is_flux,
+      flux_clip_l: is_flux ? flux_companion_path("clip_l") : nil,
+      flux_t5xxl: is_flux ? flux_companion_path("t5xxl") : nil,
+      flux_vae: is_flux ? flux_companion_path("vae") : nil,
+    )
 
     sidecar_base = {
       "prompt" => prompt_text, "negative_prompt" => negative_text,
-      "model" => model, "steps" => steps, "cfg_scale" => cfg,
-      "width" => w, "height" => h, "sampler" => sampler, "scheduler" => scheduler,
-      "model_type" => is_flux ? "flux" : "sd",
+      "model" => model, "steps" => @params[:steps], "cfg_scale" => @params[:cfg_scale],
+      "width" => @params[:width], "height" => @params[:height],
+      "sampler" => @sampler, "scheduler" => @scheduler,
+      "provider" => @provider.id, "provider_name" => @provider.display_name,
     }
-    sidecar_base["init_image"] = init_img if init_img
-    sidecar_base["strength"] = strength if init_img
+    sidecar_base["model_type"] = is_flux ? "flux" : "sd" if @provider.provider_type == :local
+    sidecar_base["init_image"] = @init_image_path if @init_image_path
+    sidecar_base["strength"] = @params[:strength] if @init_image_path
+
+    provider = @provider  # capture for thread safety
 
     cmd = Proc.new do
-      last_output = nil; last_elapsed = nil
-      error_result = nil; total_start = Time.now
-      preview_path = File.join(output_dir, ".preview_#{Process.pid}.png")
+      total_start = Time.now
 
-      @gen_current_batch = 1
-      @gen_step = 0; @gen_total_steps = 0
-
-      timestamp = Time.now.strftime("%Y%m%d_%H%M%S")
-      output_path = File.join(output_dir, "#{timestamp}.png")
-
-      @gen_preview_path = preview_path
-      @gen_preview_mtime = nil
-      @gen_preview_cache = nil
-
-      args = if is_flux
-        [sd_bin, "--diffusion-model", model,
-         "--clip_l", flux_clip_l, "--t5xxl", flux_t5xxl, "--vae", flux_vae,
-         "-p", prompt,
-         "--steps", steps.to_s, "--cfg-scale", cfg.to_s,
-         "--guidance", "3.5",
-         "-W", w.to_s, "-H", h.to_s,
-         "--seed", base_seed.to_s, "--sampling-method", sampler,
-         "--scheduler", scheduler,
-         "-t", threads.to_s, "--fa", "--vae-tiling", "--clip-on-cpu",
-         "--cache-mode", "spectrum",
-         "-b", batch_count.to_s,
-         "-o", output_path]
-      else
-        [sd_bin, "-m", model, "-p", prompt,
-         "--steps", steps.to_s, "--cfg-scale", cfg.to_s,
-         "-W", w.to_s, "-H", h.to_s,
-         "--seed", base_seed.to_s, "--sampling-method", sampler,
-         "--scheduler", scheduler,
-         "-t", threads.to_s, "--fa", "--vae-tiling", "--clip-on-cpu",
-         "--cache-mode", "spectrum",
-         "-b", batch_count.to_s,
-         "-o", output_path]
-      end
-      args += ["--preview", "proj", "--preview-path", preview_path, "--preview-interval", "1"]
-      args += ["--negative-prompt", negative] unless negative.empty?
-      args += ["--lora-model-dir", lora_dir] if has_loras && !is_flux
-      if init_img
-        args += ["--init-img", init_img, "--strength", strength.to_s]
-      end
-
-      begin
-        start_time = Time.now
-        pty_r, _pty_w, pid = PTY.spawn(*args)
-        @gen_pid = pid
-
-        all_output = +""; parsed_seed = nil; sampling_started = false
-        buf = +""
-        status = nil
-        batch_seeds = []
-
-        # Single-thread loop: read output + check if process exited
-        loop do
-          ready = IO.select([pty_r], nil, nil, 0.25)
-          if ready
-            begin
-              chunk = pty_r.readpartial(4096)
-              buf << chunk
-              all_output << chunk
-              parse_sd_output(buf, sampling_started, parsed_seed) { |new_buf, ss, ps|
-                if ps && ps != parsed_seed
-                  batch_seeds << ps
-                  @gen_current_batch = batch_seeds.length
-                end
-                buf = new_buf; sampling_started = ss; parsed_seed = ps
-              }
-            rescue Errno::EIO, EOFError
-              break
-            end
-          end
-          # Non-blocking check if process exited
-          begin
-            _, status = Process.waitpid2(pid, Process::WNOHANG)
-            if status
-              # Drain remaining output
-              loop do
-                chunk = pty_r.readpartial(4096)
-                all_output << chunk
-                buf << chunk
-                parse_sd_output(buf, sampling_started, parsed_seed) { |new_buf, ss, ps|
-                  if ps && ps != parsed_seed
-                    batch_seeds << ps
-                    @gen_current_batch = batch_seeds.length
-                  end
-                  buf = new_buf; sampling_started = ss; parsed_seed = ps
-                }
-              rescue Errno::EIO, EOFError
-                break
-              end
-              break
-            end
-          rescue Errno::ECHILD
-            break
-          end
+      result = provider.generate(request, cancelled: -> { @gen_cancelled }) do |event, data|
+        case event
+        when :status then @gen_status = data
+        when :progress
+          @gen_step = data[:step]; @gen_total_steps = data[:total]
+          @gen_secs_per_step = data[:secs_per_step]
+        when :pid then @gen_pid = data
+        when :preview_path
+          @gen_preview_path = data
+          @gen_preview_mtime = nil; @gen_preview_cache = nil
+        when :sampling_start
+          @gen_sampling_start = Time.now
+          @gen_step = 0; @gen_total_steps = 0
+        when :batch_progress then @gen_current_batch = data
         end
-
-        # If we broke out before reaping (e.g. EIO), wait now
-        _, status = Process.wait2(pid) rescue nil unless status
-        pty_r.close rescue nil
-        @gen_pid = nil
-        elapsed = (Time.now - start_time).round(1)
-
-        if @gen_cancelled || status&.signaled?
-          # Clean up any generated batch files
-          if batch_count > 1
-            batch_count.times { |i| File.delete("#{output_path.sub(/\.png$/, "")}_#{i}.png") rescue nil }
-          else
-            File.delete(output_path) rescue nil
-          end
-          File.delete(preview_path) rescue nil
-        elsif status&.success? || status.nil?
-          # Collect generated files — sd.cpp uses _N suffixes for batch > 1
-          generated = []
-          if batch_count > 1
-            base = output_path.sub(/\.png$/, "")
-            batch_count.times do |i|
-              f = "#{base}_#{i}.png"
-              next unless File.exist?(f) && File.size(f) > 0
-              ts = Time.now.strftime("%Y%m%d_%H%M%S_%L") + "_#{i}"
-              final = File.join(output_dir, "#{ts}.png")
-              File.rename(f, final)
-              generated << [final, batch_seeds[i] || (base_seed == -1 ? nil : base_seed + i)]
-            end
-          else
-            if File.exist?(output_path) && File.size(output_path) > 0
-              generated << [output_path, parsed_seed || base_seed]
-            end
-          end
-
-          if generated.any?
-            @last_seed = generated.last[1]
-            last_output = generated.last[0]; last_elapsed = elapsed
-            generated.each do |path, seed_val|
-              sidecar_path = path.sub(/\.png$/, ".json")
-              unless File.exist?(sidecar_path)
-                sidecar = sidecar_base.merge(
-                  "seed" => seed_val,
-                  "timestamp" => Time.now.iso8601,
-                  "generation_time_seconds" => elapsed
-                )
-                File.write(sidecar_path, JSON.pretty_generate(sidecar))
-              end
-            end
-          else
-            exit_code = status&.exitstatus || "unknown"
-            last_line = all_output.lines.last&.strip || "unknown"
-            hint = if all_output.include?("get sd version from file failed") || all_output.include?("new_sd_ctx_t failed")
-              name = File.basename(model)
-              "\"#{name}\" is not a supported diffusion model — try a different model"
-            elsif all_output.include?("out of memory") || all_output.include?("GGML_ASSERT")
-              "Not enough memory for this model — try a smaller/quantized version"
-            end
-            msg = hint || "Failed (exit #{exit_code}): #{last_line}"
-            error_result = GenerationErrorMessage.new(error: msg, stderr_output: all_output)
-          end
-        else
-          exit_code = status&.exitstatus || "unknown"
-          last_line = all_output.lines.last&.strip || "unknown"
-          hint = if all_output.include?("get sd version from file failed") || all_output.include?("new_sd_ctx_t failed")
-            name = File.basename(model)
-            "\"#{name}\" is not a supported diffusion model — try a different model"
-          elsif all_output.include?("out of memory") || all_output.include?("GGML_ASSERT")
-            "Not enough memory for this model — try a smaller/quantized version"
-          end
-          msg = hint || "Failed (exit #{exit_code}): #{last_line}"
-          error_result = GenerationErrorMessage.new(error: msg, stderr_output: all_output)
-        end
-      rescue Errno::ENOENT
-        @gen_pid = nil
-        error_result = GenerationErrorMessage.new(
-          error: "Binary '#{sd_bin}' not found. Set SD_BIN env var.", stderr_output: ""
-        )
-      rescue => e
-        @gen_pid = nil
-        error_result = GenerationErrorMessage.new(error: e.message, stderr_output: "")
       end
 
-      # Clean up preview file
-      File.delete(preview_path) if preview_path && File.exist?(preview_path)
-      @gen_preview_path = nil
-      @gen_preview_mtime = nil
-      @gen_preview_cache = nil
+      @gen_pid = nil
+      @gen_preview_path = nil; @gen_preview_mtime = nil; @gen_preview_cache = nil
 
       if @gen_cancelled
         @gen_cancelled = false
         GenerationErrorMessage.new(error: "Cancelled", stderr_output: "")
-      elsif error_result
-        error_result
-      elsif last_output
+      elsif result.error
+        GenerationErrorMessage.new(error: result.error, stderr_output: "")
+      elsif result.paths&.any?
+        @last_seed = result.seeds&.last
+        result.paths.each_with_index do |path, i|
+          sidecar_path = path.sub(/\.png$/, ".json")
+          unless File.exist?(sidecar_path)
+            sidecar = sidecar_base.merge(
+              "seed" => result.seeds&.[](i),
+              "timestamp" => Time.now.iso8601,
+              "generation_time_seconds" => result.elapsed
+            )
+            File.write(sidecar_path, JSON.pretty_generate(sidecar))
+          end
+        end
         GenerationDoneMessage.new(
-          output_path: last_output,
+          output_path: result.paths.last,
           elapsed: (Time.now - total_start).round(1),
           stderr_output: ""
         )
@@ -1546,59 +2391,6 @@ class Chewy
     spawn(opener, path, [:out, :err] => "/dev/null")
   end
 
-  # ========== SD Output Parsing ==========
-
-  def parse_sd_output(buf, sampling_started, parsed_seed)
-    clean = buf.gsub(/\e\[[0-9;]*[A-Za-z]/, "")
-    segments = clean.split(/[\r\n]+/)
-    new_buf = clean.end_with?("\r", "\n") ? +"" : (segments.pop || +"")
-    segments.each do |seg|
-      stripped = seg.strip
-      next if stripped.empty?
-      if seg =~ /\[INFO\s*\]\s*\S+\s*-\s*(.+)/
-        info = $1.strip
-        if info =~ /loading model/i
-          @gen_status = "Loading model..."
-        elsif info =~ /load .+ using (\w+)/i
-          @gen_status = "Loading (#{$1})..."
-        elsif info =~ /Version:\s*(.+)/
-          @gen_status = "Model: #{$1.strip}"
-        elsif info =~ /total params memory size\s*=\s*([\d.]+\s*\w+)/
-          @gen_status = "Model loaded (#{$1})"
-        elsif info =~ /sampling using (.+) method/i
-          @gen_status = "Sampler: #{$1}"
-        elsif info =~ /generating image.*seed\s+(\d+)/i
-          parsed_seed = $1.to_i
-          sampling_started = true
-          @gen_step = 0; @gen_total_steps = 0
-          @gen_sampling_start = Time.now
-          @gen_status = "Sampling (seed #{$1})..."
-        elsif info =~ /sampling completed/i
-          @gen_status = "Decoding latents..."
-        elsif info =~ /save result/i
-          @gen_status = "Saving image..."
-        end
-      end
-      if !sampling_started && seg =~ /seed\s+(\d+)/i
-        parsed_seed = $1.to_i
-        sampling_started = true
-        @gen_step = 0; @gen_total_steps = 0
-        @gen_sampling_start = Time.now
-      end
-      if sampling_started && seg =~ /(\d+)\s*\/\s*(\d+)\s*-\s*([\d.]+)\s*(s\/it|it\/s)/
-        @gen_step = $1.to_i; @gen_total_steps = $2.to_i
-        # Use sd.cpp's own speed measurement for accurate ETA
-        speed_val = $3.to_f
-        @gen_secs_per_step = if $4 == "s/it"
-          speed_val
-        else
-          speed_val > 0 ? 1.0 / speed_val : 0
-        end
-      end
-    end
-    yield new_buf, sampling_started, parsed_seed
-  end
-
   # ========== Forward Messages ==========
 
   def forward_to_focused(message)
@@ -1609,6 +2401,10 @@ class Chewy
     end
     if @overlay == :hf_token
       @hf_token_input, cmd = @hf_token_input.update(message)
+      return [self, cmd]
+    end
+    if @overlay == :api_key
+      @api_key_input, cmd = @api_key_input.update(message)
       return [self, cmd]
     end
 
@@ -1646,9 +2442,11 @@ class Chewy
     when :models then scan_models
     when :history then build_history_list
     when :lora then scan_loras
+    when :api_key then @api_key_input.focus; @api_key_input.value = ""
     when :hf_token then @hf_token_input.focus
     when :preset then nil
     when :theme then @theme_index = THEME_NAMES.index(Theme.current_name) || 0; @theme_original = Theme.current_name
+    when :provider then @provider_index = @providers.index(@provider) || 0
     when :gallery then build_gallery
     when :file_picker then scan_file_picker_dir
     end
@@ -1657,6 +2455,7 @@ class Chewy
 
   def close_overlay
     @hf_token_input.blur if @overlay == :hf_token
+    @api_key_input.blur if @overlay == :api_key
     clear_kitty_images if @kitty_graphics
     @overlay = nil
     @error_message = nil
@@ -1839,6 +2638,8 @@ class Chewy
     when :lora     then handle_lora_panel_key(message)
     when :preset   then handle_preset_panel_key(message)
     when :theme    then handle_theme_key(message)
+    when :provider then handle_provider_key(message)
+    when :api_key  then handle_api_key_key(message)
     when :hf_token then handle_hf_token_key(message)
     when :gallery  then handle_gallery_key(message)
     when :fullscreen_image then handle_fullscreen_key(message)
@@ -2748,31 +3549,44 @@ class Chewy
     logo = Theme.gradient_text(" chewy ", Theme.PRIMARY, Theme.ACCENT)
     dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
 
-    model_info = if @selected_model_path
-      name = File.basename(@selected_model_path, File.extname(@selected_model_path))
-      is_flux = flux_model?(@selected_model_path)
-      cached_type = @model_types[@selected_model_path]
-
-      # Extract quantization from filename (e.g. Q4_K, Q8_0, F16)
-      quant = name.match(/[_-](Q\d_\w+|F16|F32|q\d_\w+|f16|f32)/i)&.captures&.first&.upcase
-
-      type_label = if is_flux || cached_type == "FLUX"
-        ok = flux_companions_present?
-        pill_bg = ok ? Theme.SUCCESS : Theme.WARNING
-        " #{Lipgloss::Style.new.background(pill_bg).foreground(Theme.SURFACE).bold(true).render(" FLUX ")}"
-      elsif quant
-        " #{Lipgloss::Style.new.background(Theme.SECONDARY).foreground(Theme.BAR_TEXT).bold(true).render(" #{quant} ")}"
-      elsif cached_type
-        " #{Lipgloss::Style.new.background(Theme.SECONDARY).foreground(Theme.BAR_TEXT).render(" #{cached_type} ")}"
-      else
-        " #{Lipgloss::Style.new.background(Theme.BORDER_DIM).foreground(Theme.TEXT).render(" SD ")}"
-      end
-      " #{dim.render("\u2502")} #{Lipgloss::Style.new.foreground(Theme.TEXT).bold(true).render(name)}#{type_label}"
+    # Provider badge for remote providers
+    provider_badge = if @provider.provider_type == :api
+      prov_label = Lipgloss::Style.new.background(Theme.SECONDARY).foreground(Theme.BAR_TEXT).bold(true)
+        .render(" #{@provider.display_name} ")
+      model_name = @remote_model_id || @provider.list_models.first&.dig(:id) || "default"
+      " #{dim.render("\u2502")} #{prov_label} #{Lipgloss::Style.new.foreground(Theme.TEXT).bold(true).render(model_name)}"
     else
-      " #{dim.render("\u2502")} #{dim.render("no model selected")}"
+      ""
     end
 
-    img2img_badge = if @init_image_path
+    model_info = if @provider.provider_type == :local
+      if @selected_model_path
+        name = File.basename(@selected_model_path, File.extname(@selected_model_path))
+        is_flux = flux_model?(@selected_model_path)
+        cached_type = @model_types[@selected_model_path]
+
+        quant = name.match(/[_-](Q\d_\w+|F16|F32|q\d_\w+|f16|f32)/i)&.captures&.first&.upcase
+
+        type_label = if is_flux || cached_type == "FLUX"
+          ok = flux_companions_present?
+          pill_bg = ok ? Theme.SUCCESS : Theme.WARNING
+          " #{Lipgloss::Style.new.background(pill_bg).foreground(Theme.SURFACE).bold(true).render(" FLUX ")}"
+        elsif quant
+          " #{Lipgloss::Style.new.background(Theme.SECONDARY).foreground(Theme.BAR_TEXT).bold(true).render(" #{quant} ")}"
+        elsif cached_type
+          " #{Lipgloss::Style.new.background(Theme.SECONDARY).foreground(Theme.BAR_TEXT).render(" #{cached_type} ")}"
+        else
+          " #{Lipgloss::Style.new.background(Theme.BORDER_DIM).foreground(Theme.TEXT).render(" SD ")}"
+        end
+        " #{dim.render("\u2502")} #{Lipgloss::Style.new.foreground(Theme.TEXT).bold(true).render(name)}#{type_label}"
+      else
+        " #{dim.render("\u2502")} #{dim.render("no model selected")}"
+      end
+    else
+      provider_badge
+    end
+
+    img2img_badge = if @init_image_path && @provider.capabilities.img2img
       name = File.basename(@init_image_path)
       name = name[0, 20] + "..." if name.length > 23
       i2i = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true)
@@ -2782,7 +3596,7 @@ class Chewy
     end
 
     left = "#{logo}#{model_info}#{img2img_badge}"
-    right = dim.render("[^n] models ")
+    right = dim.render("[^y] provider  [^n] models ")
 
     # Right-align the hint
     left_visible = left.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
@@ -2921,6 +3735,7 @@ class Chewy
       status_lines << center.call("#{@spinner.view} #{gen_text} #{dim.render(dots)}#{dots_pad}")
       status_lines << ""
       status_lines << center.call(dim.render(status_text))
+      status_lines << center.call(dim.render(elapsed_str)) if elapsed > 0
     end
 
     if @gen_total_batch > 1
@@ -3265,7 +4080,7 @@ class Chewy
     keys << ["^x", "cancel"] if @generating
     keys << ["^e", "open"] if @last_output_path && !@generating
     keys << ["^f", "fullscreen"] if @last_output_path && !@generating
-    keys += [["^d", "download"], ["^a", "gallery"], ["^p", "preset"]]
+    keys += [["^y", "provider"], ["^d", "download"], ["^a", "gallery"], ["^p", "preset"]]
     keys << ["^q", "quit"]
     keys
   end
@@ -3716,6 +4531,182 @@ class Chewy
     "up/down: browse (live preview) | enter: apply | esc: cancel"
   end
 
+  # ========== Provider Overlay ==========
+
+  def handle_provider_key(message)
+    key = message.to_s
+    case key
+    when "esc", "q"
+      return close_overlay
+    when "up"
+      @provider_index = (@provider_index - 1) % @providers.length
+      return [self, nil]
+    when "down", "j"
+      @provider_index = (@provider_index + 1) % @providers.length
+      return [self, nil]
+    when "left"
+      selected = @providers[@provider_index]
+      if selected.provider_type == :api && selected.list_models.any?
+        models = selected.list_models
+        cur = models.index { |m| m[:id] == @remote_model_id } || 0
+        @remote_model_index = (cur - 1) % models.length
+        @remote_model_id = models[@remote_model_index][:id]
+        update_param_keys if selected.id == @provider.id
+      end
+      return [self, nil]
+    when "right"
+      selected = @providers[@provider_index]
+      if selected.provider_type == :api && selected.list_models.any?
+        models = selected.list_models
+        cur = models.index { |m| m[:id] == @remote_model_id } || 0
+        @remote_model_index = (cur + 1) % models.length
+        @remote_model_id = models[@remote_model_index][:id]
+        update_param_keys if selected.id == @provider.id
+      end
+      return [self, nil]
+    when "k", "s"
+      selected = @providers[@provider_index]
+      if selected.needs_api_key?
+        @provider = selected  # set so the api_key overlay knows which provider
+        @overlay = nil
+        return open_overlay(:api_key)
+      end
+      return [self, nil]
+    when "enter"
+      @provider = @providers[@provider_index]
+      if @provider.provider_type == :api && @provider.list_models.any?
+        # Reset to first model if current model isn't in this provider's list
+        models = @provider.list_models
+        unless models.any? { |m| m[:id] == @remote_model_id }
+          @remote_model_id = models.first[:id]
+          @remote_model_index = 0
+        end
+      end
+      update_param_keys
+      save_config
+      @status_message = "Provider: #{@provider.display_name}"
+      return close_overlay
+    end
+    [self, nil]
+  end
+
+  def render_provider_content
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    lines = @providers.each_with_index.map do |prov, i|
+      selected = i == @provider_index
+      active = prov.id == @provider.id
+
+      # Status indicator
+      status = if prov.needs_api_key?
+        if prov.api_key_set?
+          Lipgloss::Style.new.foreground(Theme.SUCCESS).render(" \u2713")
+        else
+          hint = selected ? " \u2014 press s to set key" : ""
+          Lipgloss::Style.new.foreground(Theme.ERROR).render(" \u2717 no key#{hint}")
+        end
+      else
+        Lipgloss::Style.new.foreground(Theme.SUCCESS).render(" \u2713")
+      end
+
+      active_badge = active ? Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true).render(" [active]") : ""
+
+      name = if selected
+        cursor = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true).render("> ")
+        label = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true).render(prov.display_name)
+        "#{cursor}#{label}#{status}#{active_badge}"
+      else
+        "  #{dim.render(prov.display_name)}#{status}#{active_badge}"
+      end
+
+      # Show model selector for API providers when selected
+      model_line = if selected && prov.provider_type == :api && prov.list_models.any?
+        models = prov.list_models
+        current_id = @remote_model_id || models.first[:id]
+        cur_model = models.find { |m| m[:id] == current_id } || models.first
+        arrow = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+        model_name = Lipgloss::Style.new.foreground(Theme.TEXT).render(cur_model[:name])
+        model_desc = dim.render(" - #{cur_model[:desc]}")
+        "\n    #{dim.render("Model:")} #{arrow.render("<")} #{model_name} #{arrow.render(">")}#{model_desc}"
+      else
+        ""
+      end
+
+      "#{name}#{model_line}"
+    end
+
+    lines.join("\n\n")
+  end
+
+  def render_provider_status
+    "up/down: select | left/right: model | s: set key | enter: activate | esc: close"
+  end
+
+  # ========== API Key Overlay ==========
+
+  def handle_api_key_key(message)
+    key = message.to_s
+    case key
+    when "esc"
+      @api_key_input.value = ""
+      return close_overlay
+    when "ctrl+v"
+      # Read from system clipboard since terminal paste doesn't work reliably
+      clip = `pbpaste 2>/dev/null`.strip rescue ""
+      unless clip.empty?
+        @api_key_input.value = clip
+        @status_message = "Pasted from clipboard"
+      end
+      return [self, nil]
+    when "enter"
+      api_key = @api_key_input.value.strip
+      if api_key.empty?
+        @error_message = "API key cannot be empty"
+        return [self, nil]
+      end
+      @provider.store_api_key(api_key)
+      @api_key_input.value = ""
+      @overlay = nil
+      @error_message = nil
+      @status_message = "#{@provider.display_name} API key saved"
+      case @focus
+      when FOCUS_PROMPT then @prompt_input.focus
+      when FOCUS_NEGATIVE then @negative_input.focus
+      end
+      return [self, nil]
+    end
+    @api_key_input, cmd = @api_key_input.update(message)
+    [self, cmd]
+  end
+
+  def render_api_key_content
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    accent = Lipgloss::Style.new.foreground(Theme.ACCENT)
+    prov = @provider
+
+    lines = []
+    lines << dim.render("#{prov.display_name} requires an API key to generate images.")
+    lines << ""
+    if prov.api_key_setup_url
+      lines << dim.render("1. Go to  ") + accent.render(prov.api_key_setup_url)
+      lines << dim.render("2. Create a new API key")
+      lines << dim.render("3. Paste it below")
+    else
+      lines << dim.render("1. Set ") + accent.render(prov.api_key_env_var) + dim.render(" environment variable")
+      lines << dim.render("   or paste your key below")
+    end
+    lines << ""
+    lines << "Key: #{@api_key_input.view}"
+    lines << ""
+    lines << dim.render("Saved to ~/.config/sdtui/keys/ (chmod 600)")
+    lines << ""
+    lines << dim.render("You can also set ") + accent.render(prov.api_key_env_var) + dim.render(" in your shell instead.")
+    lines.join("\n")
+  end
+
+  def render_api_key_status
+    "^v: paste from clipboard | enter: save | esc: cancel"
+  end
+
   # ========== HF Token Overlay ==========
 
   def handle_hf_token_key(message)
@@ -3905,4 +4896,4 @@ if (new_version = check_for_updates)
   puts ""
 end
 
-Bubbletea.run(Chewy.new, alt_screen: true)
+Bubbletea.run(Chewy.new, alt_screen: true, bracketed_paste: true)
