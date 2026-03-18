@@ -1999,16 +1999,33 @@ class Chewy
         end
       else
         # Params section
-        unless @focus == FOCUS_PARAMS
+        was_focused = @focus == FOCUS_PARAMS
+        unless was_focused
           @focus = FOCUS_PARAMS
           @prompt_input.blur
           @negative_input.blur
         end
-        # Click on specific param row when expanded
-        if @focus == FOCUS_PARAMS
-          param_row = body_y - prompt_h - negative_h - 3  # account for border + label + separator
+        # Click on specific param row when already expanded
+        if was_focused
+          param_row = body_y - prompt_h - negative_h - 3  # border + label + separator
           if param_row >= 0 && param_row < @param_display_keys.length
-            @param_index = param_row
+            if @param_index == param_row
+              # Click same param again — start editing or cycle
+              key = @param_display_keys[param_row]
+              if key == :sampler
+                @sampler_index = (@sampler_index + 1) % SAMPLER_OPTIONS.length
+                @sampler = SAMPLER_OPTIONS[@sampler_index]
+              elsif key == :scheduler
+                @scheduler_index = (@scheduler_index + 1) % SCHEDULER_OPTIONS.length
+                @scheduler = SCHEDULER_OPTIONS[@scheduler_index]
+              else
+                @editing_param = true
+                @param_edit_buffer = param_value(key).to_s
+              end
+            else
+              @param_index = param_row
+              @editing_param = false
+            end
           end
         end
       end
