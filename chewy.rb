@@ -36,11 +36,47 @@ CONFIG_PATH = File.join(CONFIG_DIR, "config.yml")
 PRESETS_PATH = File.join(CONFIG_DIR, "presets.yml")
 
 BUILTIN_PRESETS = {
-  "fast" => { "steps" => 10, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "ays" },
-  "quality" => { "steps" => 30, "cfg_scale" => 7.0, "width" => 768, "height" => 768, "sampler" => "dpm++2m", "scheduler" => "karras" },
-  "portrait" => { "steps" => 20, "cfg_scale" => 7.0, "width" => 512, "height" => 768, "sampler" => "euler_a", "scheduler" => "karras" },
-  "flux-fast" => { "steps" => 4, "cfg_scale" => 1.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "simple" },
-  "flux-quality" => { "steps" => 8, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple" },
+  # --- txt2img ---
+  "Quick Draft" => { "steps" => 10, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "ays" },
+  "Balanced" => { "steps" => 20, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler_a", "scheduler" => "karras" },
+  "High Quality" => { "steps" => 30, "cfg_scale" => 7.0, "width" => 768, "height" => 768, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  "Max Quality" => { "steps" => 50, "cfg_scale" => 7.5, "width" => 1024, "height" => 1024, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  # --- Aspect ratios ---
+  "Portrait" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 512, "height" => 768, "sampler" => "euler_a", "scheduler" => "karras" },
+  "Landscape" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 768, "height" => 512, "sampler" => "euler_a", "scheduler" => "karras" },
+  "Widescreen (16:9)" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 896, "height" => 512, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  "Square HD" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 1024, "height" => 1024, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  # --- img2img ---
+  "Image Edit - Quick" => { "steps" => 20, "cfg_scale" => 7.0, "strength" => 0.5, "sampler" => "euler_a", "scheduler" => "karras" },
+  "Image Edit - High Quality" => { "steps" => 35, "cfg_scale" => 7.0, "strength" => 0.65, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  "Image Edit - Creative" => { "steps" => 30, "cfg_scale" => 8.0, "strength" => 0.85, "sampler" => "euler_a", "scheduler" => "karras" },
+  "Image Edit - Subtle" => { "steps" => 25, "cfg_scale" => 7.0, "strength" => 0.3, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  # --- FLUX ---
+  "FLUX - Quick" => { "steps" => 4, "cfg_scale" => 1.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "simple" },
+  "FLUX - Balanced" => { "steps" => 8, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple" },
+  "FLUX - High Quality" => { "steps" => 20, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple" },
+  # --- Styles ---
+  "Photorealistic" => { "steps" => 35, "cfg_scale" => 5.0, "width" => 768, "height" => 768, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  "Artistic / Painterly" => { "steps" => 30, "cfg_scale" => 10.0, "width" => 768, "height" => 768, "sampler" => "euler_a", "scheduler" => "karras" },
+  "Pixel Art" => { "steps" => 20, "cfg_scale" => 8.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "discrete" },
+}.freeze
+
+# Best settings per model type — applied when user confirms after selecting a model
+MODEL_BEST_SETTINGS = {
+  "FLUX"   => { "steps" => 8, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple" },
+  "SDXL"   => { "steps" => 25, "cfg_scale" => 7.0, "width" => 1024, "height" => 1024, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  "SD 1.x" => { "steps" => 20, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler_a", "scheduler" => "karras" },
+  "SD 2.x" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 768, "height" => 768, "sampler" => "euler_a", "scheduler" => "karras" },
+  "SD3"    => { "steps" => 28, "cfg_scale" => 5.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple" },
+}.freeze
+
+# Recommended img2img settings per model type — higher steps + tuned strength
+IMG2IMG_BEST_SETTINGS = {
+  "FLUX"   => { "steps" => 20, "cfg_scale" => 1.0, "strength" => 0.6, "sampler" => "euler", "scheduler" => "simple" },
+  "SDXL"   => { "steps" => 30, "cfg_scale" => 7.0, "strength" => 0.7, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  "SD 1.x" => { "steps" => 30, "cfg_scale" => 7.0, "strength" => 0.75, "sampler" => "euler_a", "scheduler" => "karras" },
+  "SD 2.x" => { "steps" => 30, "cfg_scale" => 7.0, "strength" => 0.7, "sampler" => "euler_a", "scheduler" => "karras" },
+  "SD3"    => { "steps" => 35, "cfg_scale" => 5.0, "strength" => 0.65, "sampler" => "euler", "scheduler" => "simple" },
 }.freeze
 
 # FLUX companion files needed alongside the diffusion model
@@ -146,14 +182,14 @@ THEMES = {
     "success" => "#A3BE8C", "warning" => "#EBCB8B", "error" => "#BF616A",
     "text" => "#ECEFF4", "text_dim" => "#8FBCBB", "text_muted" => "#616E88",
     "surface" => "#2E3440", "border_dim" => "#434C5E", "border_focus" => "#88C0D0",
-    "bar_text" => "#2E3440",
+    "bar_text" => "#FFFFFF",
   },
   "rose pine" => {
     "primary" => "#C4A7E7", "secondary" => "#31748F", "accent" => "#EBBCBA",
     "success" => "#9CCFD8", "warning" => "#F6C177", "error" => "#EB6F92",
     "text" => "#E0DEF4", "text_dim" => "#908CAA", "text_muted" => "#6E6A86",
     "surface" => "#191724", "border_dim" => "#26233A", "border_focus" => "#C4A7E7",
-    "bar_text" => "#191724",
+    "bar_text" => "#FFFFFF",
   },
   "solarized" => {
     "primary" => "#268BD2", "secondary" => "#2AA198", "accent" => "#D33682",
@@ -309,14 +345,14 @@ module Provider
   Capabilities = Struct.new(
     :negative_prompt, :seed, :batch, :img2img, :live_preview,
     :cancel, :model_listing, :lora, :cfg_scale, :sampler,
-    :scheduler, :threads, :strength, :width_height,
+    :scheduler, :threads, :strength, :width_height, :controlnet,
     keyword_init: true
   ) do
     def initialize(**kwargs)
       defaults = { negative_prompt: false, seed: false, batch: false, img2img: false,
                    live_preview: false, cancel: false, model_listing: false, lora: false,
                    cfg_scale: false, sampler: false, scheduler: false, threads: false,
-                   strength: false, width_height: true }
+                   strength: false, width_height: true, controlnet: false }
       super(**defaults.merge(kwargs))
     end
   end
@@ -326,6 +362,7 @@ module Provider
     :width, :height, :seed, :sampler, :scheduler, :batch,
     :init_image, :strength, :threads, :loras, :output_dir,
     :is_flux, :flux_clip_l, :flux_t5xxl, :flux_vae,
+    :controlnet_model, :controlnet_image, :controlnet_strength, :controlnet_canny,
     keyword_init: true
   )
 
@@ -392,7 +429,7 @@ class LocalSdCppProvider < Provider::Base
       negative_prompt: true, seed: true, batch: true, img2img: true,
       live_preview: true, cancel: true, model_listing: true, lora: true,
       cfg_scale: true, sampler: true, scheduler: true, threads: true,
-      strength: true, width_height: true
+      strength: true, width_height: true, controlnet: true
     )
   end
 
@@ -521,6 +558,11 @@ class LocalSdCppProvider < Provider::Base
     args += ["--lora-model-dir", @lora_dir] if request.loras&.any? && !request.is_flux
     if request.init_image
       args += ["--init-img", request.init_image, "--strength", request.strength.to_s]
+    end
+    if request.controlnet_model && request.controlnet_image
+      args += ["--control-net", request.controlnet_model, "--control-image", request.controlnet_image]
+      args += ["--control-strength", (request.controlnet_strength || 0.9).to_s]
+      args << "--control-canny" if request.controlnet_canny
     end
     args
   end
@@ -1234,6 +1276,134 @@ class OpenAICompatibleProvider < Provider::Base
   end
 end
 
+# ---------- A1111 (Automatic1111) Provider ----------
+
+class A1111Provider < Provider::Base
+  DEFAULT_URL = "http://127.0.0.1:7860".freeze
+
+  def initialize(config = {})
+    @base_url = config["base_url"] || DEFAULT_URL
+  end
+
+  def id; "a1111"; end
+  def display_name; "A1111 (local)"; end
+  def provider_type; :api; end
+
+  def capabilities
+    Provider::Capabilities.new(
+      negative_prompt: true, seed: true, batch: true, img2img: true,
+      live_preview: false, cancel: true, model_listing: true, lora: false,
+      cfg_scale: true, sampler: true, scheduler: false, threads: false,
+      strength: true, width_height: true, controlnet: false
+    )
+  end
+
+  def needs_api_key?; false; end
+  def api_key_set?; true; end
+
+  def list_models
+    uri = URI.parse("#{@base_url}/sdapi/v1/sd-models")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = (uri.scheme == "https")
+    http.open_timeout = 5; http.read_timeout = 10
+    resp = http.request(Net::HTTP::Get.new(uri))
+    return [{ id: "default", name: "Default", desc: "Whatever is loaded in A1111" }] unless resp.is_a?(Net::HTTPSuccess)
+    models = JSON.parse(resp.body)
+    models.map { |m| { id: m["title"], name: m["model_name"] || m["title"], desc: m["filename"] || "" } }
+  rescue
+    [{ id: "default", name: "Default", desc: "Could not connect to #{@base_url}" }]
+  end
+
+  def generate(request, cancelled: -> { false }, &on_event)
+    on_event&.call(:status, "Connecting to A1111...")
+
+    endpoint = request.init_image ? "img2img" : "txt2img"
+    uri = URI.parse("#{@base_url}/sdapi/v1/#{endpoint}")
+
+    body = {
+      prompt: request.prompt,
+      negative_prompt: request.negative_prompt || "",
+      steps: request.steps || 20,
+      cfg_scale: request.cfg_scale || 7.0,
+      width: request.width || 512,
+      height: request.height || 512,
+      seed: request.seed || -1,
+      sampler_name: request.sampler || "Euler a",
+      batch_size: [request.batch || 1, 1].max,
+      save_images: false,
+      send_images: true,
+    }
+
+    # Model override
+    if request.model && request.model != "default"
+      body[:override_settings] = { sd_model_checkpoint: request.model }
+    end
+
+    # img2img specific
+    if request.init_image
+      img_data = Base64.strict_encode64(File.binread(request.init_image))
+      body[:init_images] = [img_data]
+      body[:denoising_strength] = request.strength || 0.75
+    end
+
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = (uri.scheme == "https")
+    http.open_timeout = 30
+    http.read_timeout = 600
+
+    req = Net::HTTP::Post.new(uri)
+    req["Content-Type"] = "application/json"
+    req.body = JSON.generate(body)
+
+    on_event&.call(:status, "Generating...")
+    start_time = Time.now
+    resp = http.request(req)
+    elapsed = (Time.now - start_time).round(1)
+
+    unless resp.is_a?(Net::HTTPSuccess)
+      error_body = JSON.parse(resp.body) rescue {}
+      error_msg = error_body["detail"] || "HTTP #{resp.code}: #{resp.message}"
+      return Provider::GenerationResult.new(error: error_msg)
+    end
+
+    data = JSON.parse(resp.body)
+    images = data["images"] || []
+    return Provider::GenerationResult.new(error: "No images returned") if images.empty?
+
+    # Parse generation info for seeds
+    info = JSON.parse(data["info"]) rescue {}
+    seeds = info["all_seeds"] || [info["seed"]] || []
+
+    on_event&.call(:status, "Saving images...")
+    FileUtils.mkdir_p(request.output_dir)
+
+    paths = []
+    images.each_with_index do |b64, i|
+      timestamp = Time.now.strftime("%Y%m%d_%H%M%S_%L")
+      output_path = File.join(request.output_dir, "#{timestamp}_#{i}.png")
+      File.binwrite(output_path, Base64.decode64(b64))
+      paths << output_path
+    end
+
+    return Provider::GenerationResult.new(error: "Failed to save images") if paths.empty?
+    Provider::GenerationResult.new(paths: paths, seeds: seeds, elapsed: elapsed)
+  rescue Errno::ECONNREFUSED
+    Provider::GenerationResult.new(error: "Cannot connect to A1111 at #{@base_url} — is it running with --api?")
+  rescue => e
+    Provider::GenerationResult.new(error: e.message)
+  end
+
+  def cancel(_handle)
+    uri = URI.parse("#{@base_url}/sdapi/v1/interrupt")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = (uri.scheme == "https")
+    http.open_timeout = 5; http.read_timeout = 5
+    http.request(Net::HTTP::Post.new(uri))
+  rescue
+    nil
+  end
+end
+
 # ---------- Main App ----------
 
 class Chewy
@@ -1329,15 +1499,21 @@ class Chewy
     @remote_model_id = @config["remote_model"] || nil
     @remote_model_index = 0
 
-    # Overlay: nil, :models, :download, :history, :lora, :preset, :hf_token, :gallery, :fullscreen_image, :file_picker, :theme, :provider
+    # Overlay: nil, :models, :download, :lora, :preset, :hf_token, :gallery, :fullscreen_image, :file_picker, :theme, :provider
     @overlay = nil
 
-    # img2img
+    # img2img / ControlNet
     @init_image_path = nil
+    @controlnet_model_path = nil
+    @controlnet_image_path = nil
+    @controlnet_strength = 0.9
+    @controlnet_canny = false
+    @file_picker_target = :init_image
     @file_picker_dir = File.expand_path("~")
     @file_picker_entries = []
     @file_picker_index = 0
     @file_picker_scroll = 0
+    @file_picker_thumb_cache = {}
 
     # Gallery
     @gallery_images = []
@@ -1393,10 +1569,6 @@ class Chewy
     @download_search_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
     @download_search_focused = false
 
-    # Generation history
-    @generation_history = []
-    @history_list = nil
-
     # LoRA
     @available_loras = []
     @selected_loras = [] # [{name:, path:, weight:}]
@@ -1410,6 +1582,11 @@ class Chewy
     @naming_preset = false
     @preset_name_buffer = ""
     @confirm_delete_preset = false
+
+    # Best-settings confirmation after model selection / img2img
+    @confirm_apply_best_settings = false
+    @pending_best_settings_type = nil
+    @pending_best_settings_img2img = false
 
     # FLUX companion downloads
     @companion_downloading = false
@@ -1489,6 +1666,7 @@ class Chewy
       FireworksProvider.new,
       GeminiProvider.new,
       HuggingFaceInferenceProvider.new,
+      A1111Provider.new(@config["a1111"] || {}),
     ]
     # Add user-configured OpenAI-compatible endpoint if present
     if (compat_cfg = @config["openai_compatible"])
@@ -1510,6 +1688,12 @@ class Chewy
     keys << :batch if caps.batch
     keys << :strength if caps.strength
     keys << :threads if caps.threads
+    if caps.controlnet
+      keys << :cn_model
+      keys << :cn_image
+      keys << :cn_strength
+      keys << :cn_canny
+    end
     @param_display_keys = keys
     @param_index = [[@param_index, keys.length - 1].min, 0].max
   end
@@ -1519,7 +1703,6 @@ class Chewy
   def init
     scan_models
     scan_loras
-    load_generation_history
     _spinner, spinner_cmd = @spinner.init
     splash_cmd = Bubbletea.tick(0.4) { SplashTickMessage.new(phase: 1) }
     [self, Bubbletea.batch(spinner_cmd, splash_cmd)]
@@ -1545,12 +1728,7 @@ class Chewy
       @last_generation_time = message.elapsed
       @preview_cache = nil
       @status_message = nil; @error_message = nil
-      load_generation_history
-      # Start progressive reveal animation
-      @reveal_phase = 0
-      @reveal_path = message.output_path
-      cmd = Bubbletea.tick(0.05) { RevealTickMessage.new(phase: 1) }
-      [self, cmd]
+      [self, nil]
     when RevealTickMessage
       handle_reveal_tick(message)
     when GenerationErrorMessage
@@ -1620,15 +1798,16 @@ class Chewy
       render_splash
     else
       case @overlay
-      when :models   then render_overlay_panel("Models", render_models_content, render_models_status)
+      when :models
+        title = @provider.provider_type == :api ? "#{@provider.display_name} Models" : "Models"
+        render_overlay_panel(title, render_models_content, render_models_status)
       when :download then render_download_view
-      when :history  then render_overlay_panel("Generation History", render_history_content, render_history_status)
       when :lora     then render_overlay_panel("LoRA Selection", render_lora_content, render_lora_status)
       when :preset   then render_overlay_panel("Presets", render_preset_content, render_preset_status)
       when :hf_token then render_overlay_panel("HuggingFace Token", render_hf_token_content, render_hf_token_status)
       when :gallery  then render_gallery_view
       when :fullscreen_image then render_fullscreen_image
-      when :file_picker then render_overlay_panel("Select Image", render_file_picker_content, render_file_picker_status)
+      when :file_picker then render_file_picker_view
       when :theme then render_overlay_panel("Theme", render_theme_content, render_theme_status)
       when :provider then render_overlay_panel("Provider", render_provider_content, render_provider_status)
       when :api_key then render_overlay_panel("API Key", render_api_key_content, render_api_key_status)
@@ -1731,6 +1910,31 @@ class Chewy
     end
   end
 
+  def scan_api_models
+    models = @provider.list_models
+    @api_model_entries = models
+
+    items = if models.empty?
+      [{ title: "No models available", description: "" }]
+    else
+      models.map do |m|
+        { title: "  #{m[:name]}", description: m[:desc] || "" }
+      end
+    end
+
+    @model_list = Bubbles::List.new(items, width: @width - 8, height: [@height - 10, 6].max)
+    @model_list.show_title = false
+    @model_list.show_status_bar = false
+    @model_list.selected_item_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    @model_list.item_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+
+    # Select current model
+    if models.any?
+      cur = models.index { |m| m[:id] == @remote_model_id } || 0
+      @model_list.select(cur)
+    end
+  end
+
   def model_type_tag(path)
     # Use cached type from previous validation if available
     if @model_types[path]
@@ -1817,20 +2021,6 @@ class Chewy
     pattern = File.join(@lora_dir, "**", "*.safetensors")
     @available_loras = Dir.glob(pattern).map do |f|
       { name: File.basename(f, ".safetensors"), path: f }
-    end
-  end
-
-  def load_generation_history
-    return unless File.directory?(@output_dir)
-    pattern = File.join(@output_dir, "*.json")
-    files = Dir.glob(pattern).sort.reverse
-    @generation_history = files.first(100).filter_map do |f|
-      data = JSON.parse(File.read(f))
-      data["_sidecar_path"] = f
-      data["_image_path"] = f.sub(/\.json$/, ".png")
-      data
-    rescue
-      nil
     end
   end
 
@@ -2095,6 +2285,18 @@ class Chewy
   def handle_main_key(message)
     key = message.to_s
 
+    # Handle img2img best-settings confirmation on main view
+    if @confirm_apply_best_settings && @pending_best_settings_img2img
+      source = IMG2IMG_BEST_SETTINGS[@pending_best_settings_type]
+      if key == "y" && source
+        load_preset({ data: source })
+      end
+      @confirm_apply_best_settings = false
+      @pending_best_settings_type = nil
+      @pending_best_settings_img2img = false
+      return [self, nil]
+    end
+
     # Global shortcuts (work everywhere, including text inputs)
     # Note: ctrl+m=Enter, ctrl+h=Backspace, ctrl+i=Tab are indistinguishable in terminals
     case key
@@ -2102,7 +2304,7 @@ class Chewy
     when "ctrl+q" then return [self, Bubbletea.quit]
     when "ctrl+n" then return toggle_overlay(:models)     # n = navigate models
     when "ctrl+d" then return enter_download_mode
-    when "ctrl+g" then return toggle_overlay(:history)     # g = generation history
+    when "ctrl+g" then return toggle_overlay(:gallery)     # g = gallery
     when "ctrl+l" then return toggle_overlay(:lora)
     when "ctrl+p" then return toggle_overlay(:preset)
     when "ctrl+t" then return toggle_overlay(:theme)
@@ -2178,25 +2380,30 @@ class Chewy
       elsif current_key == :scheduler
         @scheduler_index = (@scheduler_index + 1) % SCHEDULER_OPTIONS.length
         @scheduler = SCHEDULER_OPTIONS[@scheduler_index]
+      elsif current_key == :cn_model
+        return open_controlnet_model_picker
+      elsif current_key == :cn_image
+        return open_file_picker_for(:controlnet)
+      elsif current_key == :cn_canny
+        @controlnet_canny = !@controlnet_canny
+      elsif current_key == :cn_strength
+        @editing_param = true
+        @param_edit_buffer = @controlnet_strength.to_s
       else
         @editing_param = true
         @param_edit_buffer = param_value(current_key).to_s
       end
-    when "left"
+    when "left", "right"
       if current_key == :sampler
-        @sampler_index = (@sampler_index - 1) % SAMPLER_OPTIONS.length
+        dir = key == "left" ? -1 : 1
+        @sampler_index = (@sampler_index + dir) % SAMPLER_OPTIONS.length
         @sampler = SAMPLER_OPTIONS[@sampler_index]
       elsif current_key == :scheduler
-        @scheduler_index = (@scheduler_index - 1) % SCHEDULER_OPTIONS.length
+        dir = key == "left" ? -1 : 1
+        @scheduler_index = (@scheduler_index + dir) % SCHEDULER_OPTIONS.length
         @scheduler = SCHEDULER_OPTIONS[@scheduler_index]
-      end
-    when "right"
-      if current_key == :sampler
-        @sampler_index = (@sampler_index + 1) % SAMPLER_OPTIONS.length
-        @sampler = SAMPLER_OPTIONS[@sampler_index]
-      elsif current_key == :scheduler
-        @scheduler_index = (@scheduler_index + 1) % SCHEDULER_OPTIONS.length
-        @scheduler = SCHEDULER_OPTIONS[@scheduler_index]
+      elsif current_key == :cn_canny
+        @controlnet_canny = !@controlnet_canny
       end
     end
     [self, nil]
@@ -2206,6 +2413,10 @@ class Chewy
     case key
     when :sampler then @sampler
     when :scheduler then @scheduler
+    when :cn_model then @controlnet_model_path ? File.basename(@controlnet_model_path) : "none"
+    when :cn_image then @controlnet_image_path ? File.basename(@controlnet_image_path) : "none"
+    when :cn_strength then @controlnet_strength
+    when :cn_canny then @controlnet_canny ? "on" : "off"
     else @params[key]
     end
   end
@@ -2213,6 +2424,12 @@ class Chewy
   def commit_param_edit
     key = @param_display_keys[@param_index]
     return if key == :sampler || key == :scheduler
+
+    if key == :cn_strength
+      @controlnet_strength = @param_edit_buffer.to_f.clamp(0.0, 1.0)
+      @editing_param = false; @param_edit_buffer = ""
+      return
+    end
 
     current = @params[key]
     new_val = current.is_a?(Float) ? @param_edit_buffer.to_f : @param_edit_buffer.to_i
@@ -2282,6 +2499,25 @@ class Chewy
     @recent_models.unshift(path)
     @recent_models = @recent_models.first(5)
     save_config
+  end
+
+  def detect_model_type(path)
+    return nil unless path
+    # Prefer cached validated type
+    return @model_types[path] if @model_types[path]
+    # Guess from filename
+    name = File.basename(path).downcase
+    if name.include?("flux")
+      "FLUX"
+    elsif name.include?("sdxl") || name.include?("sd_xl")
+      "SDXL"
+    elsif name.include?("sd3")
+      "SD3"
+    elsif name.include?("sd15") || name.include?("sd1.") || name.include?("sd_1") || name.include?("v1-")
+      "SD 1.x"
+    elsif name.include?("sd2") || name.include?("v2-")
+      "SD 2.x"
+    end
   end
 
   # ========== FLUX Support ==========
@@ -2404,6 +2640,23 @@ class Chewy
       @error_message = "Prompt cannot be empty"; return [self, nil]
     end
 
+    # Warn about Schnell + img2img — Schnell is distilled for txt2img and img2img results are poor
+    if @init_image_path && @provider.provider_type == :local && @selected_model_path
+      name = File.basename(@selected_model_path).downcase
+      if name.include?("schnell")
+        @error_message = "Schnell models are poor at img2img — use FLUX Dev, SD 1.5, or SDXL instead"
+        return [self, nil]
+      end
+    end
+
+    # ControlNet is not supported with FLUX models
+    if @controlnet_model_path && @provider.provider_type == :local && @selected_model_path
+      if flux_model?(@selected_model_path)
+        @error_message = "ControlNet is not supported with FLUX models — use SD 1.5, SD 2.x, or SDXL"
+        return [self, nil]
+      end
+    end
+
     # Local provider needs a model file; remote providers use @remote_model_id
     if @provider.provider_type == :local
       unless @selected_model_path
@@ -2459,6 +2712,10 @@ class Chewy
       flux_clip_l: is_flux ? flux_companion_path("clip_l") : nil,
       flux_t5xxl: is_flux ? flux_companion_path("t5xxl") : nil,
       flux_vae: is_flux ? flux_companion_path("vae") : nil,
+      controlnet_model: @controlnet_model_path,
+      controlnet_image: @controlnet_image_path,
+      controlnet_strength: @controlnet_strength,
+      controlnet_canny: @controlnet_canny,
     )
 
     sidecar_base = {
@@ -2471,6 +2728,12 @@ class Chewy
     sidecar_base["model_type"] = is_flux ? "flux" : "sd" if @provider.provider_type == :local
     sidecar_base["init_image"] = @init_image_path if @init_image_path
     sidecar_base["strength"] = @params[:strength] if @init_image_path
+    if @controlnet_model_path
+      sidecar_base["controlnet_model"] = @controlnet_model_path
+      sidecar_base["controlnet_image"] = @controlnet_image_path
+      sidecar_base["controlnet_strength"] = @controlnet_strength
+      sidecar_base["controlnet_canny"] = @controlnet_canny
+    end
 
     provider = @provider  # capture for thread safety
 
@@ -2581,8 +2844,7 @@ class Chewy
     @error_message = nil
 
     case name
-    when :models then scan_models
-    when :history then build_history_list
+    when :models then @provider.provider_type == :api ? scan_api_models : scan_models
     when :lora then scan_loras
     when :api_key then @api_key_input.focus; @api_key_input.value = ""
     when :hf_token then @hf_token_input.focus
@@ -2776,7 +3038,6 @@ class Chewy
     case @overlay
     when :models   then handle_models_panel_key(message)
     when :download then handle_download_key(message)
-    when :history  then handle_history_panel_key(message)
     when :lora     then handle_lora_panel_key(message)
     when :preset   then handle_preset_panel_key(message)
     when :theme    then handle_theme_key(message)
@@ -2794,8 +3055,32 @@ class Chewy
 
   def handle_models_panel_key(message)
     key = message.to_s
+
+    # Handle best-settings confirmation popup
+    if @confirm_apply_best_settings
+      case key
+      when "y"
+        source = @pending_best_settings_img2img ? IMG2IMG_BEST_SETTINGS : MODEL_BEST_SETTINGS
+        settings = source[@pending_best_settings_type]
+        load_preset({ data: settings }) if settings
+        @confirm_apply_best_settings = false
+        @pending_best_settings_type = nil
+        @pending_best_settings_img2img = false
+        return close_overlay
+      else
+        @confirm_apply_best_settings = false
+        @pending_best_settings_type = nil
+        @pending_best_settings_img2img = false
+        return close_overlay
+      end
+    end
+
     return close_overlay if key == "esc" || key == "q"
     return [self, nil] unless @model_list
+
+    if @provider.provider_type == :api
+      return handle_api_model_select(key, message)
+    end
 
     case key
     when "enter"
@@ -2805,8 +3090,18 @@ class Chewy
         @preview_cache = nil # invalidate preview when model changes
         save_config
         # Validate model in background if we don't know its type yet
+        validate_cmd = nil
         unless @model_types[@selected_model_path]
           validate_cmd = validate_model_cmd(@selected_model_path)
+        end
+        # Offer best settings if we can detect the model type
+        model_type = detect_model_type(@selected_model_path)
+        if model_type && MODEL_BEST_SETTINGS[model_type]
+          @confirm_apply_best_settings = true
+          @pending_best_settings_type = model_type
+          return [self, validate_cmd]
+        end
+        if validate_cmd
           close_overlay
           return [self, validate_cmd]
         end
@@ -2826,6 +3121,44 @@ class Chewy
 
     @model_list, cmd = @model_list.update(message)
     [self, cmd]
+  end
+
+  def handle_api_model_select(key, message)
+    models = @api_model_entries || @provider.list_models
+    case key
+    when "enter"
+      idx = @model_list.selected_index rescue 0
+      if models.any? && idx < models.length
+        selected = models[idx]
+        @remote_model_id = selected[:id]
+        @remote_model_index = idx
+        update_param_keys
+        save_config
+        # Offer best settings based on model type hint
+        model_type = api_model_type(selected)
+        if model_type && MODEL_BEST_SETTINGS[model_type]
+          @confirm_apply_best_settings = true
+          @pending_best_settings_type = model_type
+          return [self, nil]
+        end
+      end
+      return close_overlay
+    end
+
+    @model_list, cmd = @model_list.update(message)
+    [self, cmd]
+  end
+
+  def api_model_type(model)
+    return model[:type].to_s.upcase if model[:type]
+    name = (model[:name] || model[:id] || "").downcase
+    if name.include?("flux")
+      "FLUX"
+    elsif name.include?("sdxl") || name.include?("sd xl")
+      "SDXL"
+    elsif name.include?("sd 3") || name.include?("sd3")
+      "SD3"
+    end
   end
 
   def delete_selected_model
@@ -2959,39 +3292,6 @@ class Chewy
     [self, cmd]
   end
 
-  # -- History keys --
-
-  def build_history_list
-    items = @generation_history.map do |h|
-      prompt = (h["prompt"] || "?")[0, 40]
-      model = File.basename(h["model"] || "?")
-      seed = h["seed"] || "?"
-      { title: prompt, description: "#{model} | seed:#{seed} | #{(h["timestamp"] || "?")[0, 19]}" }
-    end
-    items = [{ title: "No history", description: "Generate an image first" }] if items.empty?
-    @history_list = Bubbles::List.new(items, width: @width - 4, height: @height - 6)
-    @history_list.title = "Generation History"
-    @history_list.show_status_bar = false
-    @history_list.selected_item_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
-    @history_list.item_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
-  end
-
-  def handle_history_panel_key(message)
-    key = message.to_s
-    return close_overlay if key == "esc" || key == "q"
-    return [self, nil] unless @history_list
-
-    if key == "enter" && @generation_history.any?
-      idx = @history_list.selected_index rescue 0
-      entry = @generation_history[idx]
-      load_from_history(entry) if entry
-      return close_overlay
-    end
-
-    @history_list, cmd = @history_list.update(message)
-    [self, cmd]
-  end
-
   def load_from_history(entry)
     @prompt_input.value = entry["prompt"] || ""
     @negative_input.value = entry["negative_prompt"] || ""
@@ -3007,6 +3307,27 @@ class Chewy
     if entry["model"] && File.exist?(entry["model"])
       @selected_model_path = entry["model"]
     end
+    if entry["provider"]
+      match = @providers.find { |p| p.id == entry["provider"] }
+      if match
+        @provider = match
+        @provider_index = @providers.index(match)
+        @active_provider_id = match.id
+        update_param_keys
+      end
+    end
+  end
+
+  def offer_img2img_settings
+    model_type = if @provider.provider_type == :local && @selected_model_path
+      detect_model_type(@selected_model_path)
+    end
+    if model_type && IMG2IMG_BEST_SETTINGS[model_type]
+      @confirm_apply_best_settings = true
+      @pending_best_settings_type = model_type
+      @pending_best_settings_img2img = true
+    end
+    [self, nil]
   end
 
   # -- Gallery keys --
@@ -3045,6 +3366,10 @@ class Chewy
       open_image(@gallery_images[@gallery_index][:path])
     when "delete", "backspace"
       delete_gallery_image
+    when "p"
+      entry = @gallery_images[@gallery_index]
+      load_from_history(entry[:meta]) if entry[:meta] && !entry[:meta].empty?
+      return close_overlay
     end
     [self, nil]
   end
@@ -3059,7 +3384,6 @@ class Chewy
     @gallery_thumb_cache.delete(entry[:path])
     @gallery_images.delete_at(@gallery_index)
     @gallery_index = [[@gallery_index, @gallery_images.length - 1].min, 0].max
-    load_generation_history
   end
 
   # -- Fullscreen image view --
@@ -3223,6 +3547,7 @@ class Chewy
       @scheduler = d["scheduler"]
       @scheduler_index = SCHEDULER_OPTIONS.index(@scheduler) || 0
     end
+    @params[:strength] = d["strength"].to_f if d["strength"]
   end
 
   def save_user_preset(name)
@@ -3244,24 +3569,53 @@ class Chewy
     @preset_index = [0, @preset_index - 1].max
   end
 
-  # ========== File Picker (img2img) ==========
+  # ========== File Picker ==========
 
   IMAGE_EXTENSIONS = %w[.png .jpg .jpeg .webp .bmp].freeze
+  MODEL_EXTENSIONS = %w[.gguf .safetensors .ckpt .pth].freeze
 
   def open_file_picker
+    open_file_picker_for(:init_image)
+  end
+
+  def open_file_picker_for(target)
+    @file_picker_target = target
     case @focus
     when FOCUS_PROMPT then @prompt_input.blur
     when FOCUS_NEGATIVE then @negative_input.blur
     end
     @overlay = :file_picker
     @error_message = nil
-    # Start in outputs dir if it exists, otherwise home
-    @file_picker_dir = if @init_image_path
-      File.dirname(@init_image_path)
-    elsif File.directory?(@output_dir)
-      File.expand_path(@output_dir)
+    @file_picker_dir = case target
+    when :init_image
+      if @init_image_path then File.dirname(@init_image_path)
+      elsif File.directory?(@output_dir) then File.expand_path(@output_dir)
+      else File.expand_path("~")
+      end
+    when :controlnet
+      if @controlnet_image_path then File.dirname(@controlnet_image_path)
+      elsif File.directory?(@output_dir) then File.expand_path(@output_dir)
+      else File.expand_path("~")
+      end
     else
       File.expand_path("~")
+    end
+    scan_file_picker_dir
+    [self, nil]
+  end
+
+  def open_controlnet_model_picker
+    @file_picker_target = :cn_model
+    case @focus
+    when FOCUS_PROMPT then @prompt_input.blur
+    when FOCUS_NEGATIVE then @negative_input.blur
+    end
+    @overlay = :file_picker
+    @error_message = nil
+    @file_picker_dir = if @controlnet_model_path
+      File.dirname(@controlnet_model_path)
+    else
+      @models_dir || File.expand_path("~/models")
     end
     scan_file_picker_dir
     [self, nil]
@@ -3332,9 +3686,13 @@ class Chewy
 
         if File.directory?(full)
           entries << { name: "#{name}/", path: full, type: :dir }
-        elsif IMAGE_EXTENSIONS.include?(File.extname(name).downcase)
-          size = File.size(full) rescue 0
-          entries << { name: name, path: full, type: :file, size: size }
+        else
+          ext = File.extname(name).downcase
+          allowed = @file_picker_target == :cn_model ? MODEL_EXTENSIONS : IMAGE_EXTENSIONS
+          if allowed.include?(ext)
+            size = File.size(full) rescue 0
+            entries << { name: name, path: full, type: :file, size: size }
+          end
         end
       end
     rescue Errno::EACCES
@@ -3344,6 +3702,7 @@ class Chewy
     @file_picker_entries = entries
     @file_picker_index = 0
     @file_picker_scroll = 0
+    @file_picker_thumb_cache = {}
   end
 
   def handle_file_picker_key(message)
@@ -3364,10 +3723,21 @@ class Chewy
         @file_picker_dir = entry[:path]
         scan_file_picker_dir
       else
-        # Select image
-        @init_image_path = entry[:path]
-        @status_message = "Init image: #{File.basename(entry[:path])}"
-        return close_overlay
+        case @file_picker_target
+        when :controlnet
+          @controlnet_image_path = entry[:path]
+          @status_message = "ControlNet image: #{File.basename(entry[:path])}"
+          return close_overlay
+        when :cn_model
+          @controlnet_model_path = entry[:path]
+          @status_message = "ControlNet model: #{File.basename(entry[:path])}"
+          return close_overlay
+        else
+          @init_image_path = entry[:path]
+          @status_message = "Init image: #{File.basename(entry[:path])}"
+          close_overlay
+          return offer_img2img_settings
+        end
       end
     when "backspace"
       # Go up one directory
@@ -3391,29 +3761,37 @@ class Chewy
     [self, nil]
   end
 
-  def render_file_picker_content
+  def render_file_picker_view
     dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
     accent = Lipgloss::Style.new.foreground(Theme.ACCENT)
     dir_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
     file_style = Lipgloss::Style.new.foreground(Theme.TEXT)
     selected_style = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true)
-
-    # Current directory header
-    header = dim.render("  ") + accent.render(@file_picker_dir)
-    lines = [header, ""]
+    title_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
 
     if @file_picker_entries.empty?
-      lines << dim.render("  No image files found")
-      return lines.join("\n")
+      content = dim.render("No image files found in #{@file_picker_dir}")
+      return render_overlay_panel("Select Image", content, "esc: close")
     end
 
-    # Show init image status
+    inner_h = @height - 6
+    list_w = [(@width * 0.4).to_i, 30].max
+    preview_w = @width - list_w - 8
+
+    # -- Left: file list --
+    dir_label = @file_picker_dir
+    max_dir_len = list_w - 4
+    dir_label = "..." + dir_label[-(max_dir_len - 3)..] if dir_label.length > max_dir_len
+
+    list_lines = [accent.render(dir_label), ""]
+
     if @init_image_path
-      lines << dim.render("  Current: ") + file_style.render(File.basename(@init_image_path))
-      lines << ""
+      list_lines << dim.render("Current: ") + file_style.render(File.basename(@init_image_path))
+      list_lines << ""
     end
 
-    visible_h = @height - 10
+    header_h = list_lines.length
+    visible_h = inner_h - header_h - 4
     visible = @file_picker_entries[@file_picker_scroll, visible_h] || []
 
     visible.each_with_index do |entry, i|
@@ -3423,26 +3801,79 @@ class Chewy
 
       if entry[:type] == :dir
         name = selected ? selected_style.render(entry[:name]) : dir_style.render(entry[:name])
-        lines << "#{cursor}#{name}"
+        list_lines << "#{cursor}#{name}"
       else
         name_str = selected ? selected_style.render(entry[:name]) : file_style.render(entry[:name])
         size_str = dim.render("  #{format_bytes(entry[:size] || 0)}")
-        lines << "#{cursor}#{name_str}#{size_str}"
+        list_lines << "#{cursor}#{name_str}#{size_str}"
       end
     end
 
     if @file_picker_entries.length > visible_h
-      lines << ""
-      lines << dim.render("  #{@file_picker_index + 1}/#{@file_picker_entries.length}")
+      list_lines << ""
+      list_lines << dim.render("#{@file_picker_index + 1}/#{@file_picker_entries.length}")
     end
 
-    lines.join("\n")
+    list_content = list_lines.join("\n")
+    list_panel = Lipgloss::Style.new
+      .border(:rounded).border_foreground(Theme.PRIMARY).background(Theme.SURFACE)
+      .width(list_w).height(inner_h).padding(0, 1)
+      .render(list_content)
+
+    # -- Right: preview --
+    entry = @file_picker_entries[@file_picker_index]
+    preview_content = if entry && entry[:type] == :file && @file_picker_target != :cn_model
+      thumb = file_picker_thumb(entry[:path], preview_w - 4, inner_h - 4)
+      if thumb
+        info = dim.render(entry[:name])
+        thumb + "\n" + info
+      else
+        dim.render("(no preview)")
+      end
+    elsif entry && entry[:type] == :file && @file_picker_target == :cn_model
+      size_str = format_bytes(entry[:size] || 0)
+      "#{dim.render(entry[:name])}\n#{dim.render(size_str)}"
+    elsif entry && entry[:type] == :dir
+      dim.render("Directory")
+    else
+      dim.render("(no preview)")
+    end
+
+    preview_panel = Lipgloss::Style.new
+      .border(:rounded).border_foreground(Theme.BORDER_DIM).background(Theme.SURFACE)
+      .width(preview_w).height(inner_h).padding(0, 1)
+      .render(preview_content)
+
+    body = Lipgloss.join_horizontal(:top, list_panel, preview_panel)
+
+    picker_title = case @file_picker_target
+    when :cn_model then "Select ControlNet Model"
+    when :controlnet then "Select ControlNet Image"
+    else "Select Image"
+    end
+    title_bar = title_style.render(picker_title)
+    outer = Lipgloss::Style.new.padding(0, 1).render(
+      Lipgloss.join_vertical(:left, title_bar, body)
+    )
+
+    status_text = "enter: select | backspace: up dir | ~: home | j/k: navigate | esc: cancel"
+    key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
+    desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+    status = Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE)
+      .render(format_help_text(status_text, key_style, desc_style))
+
+    Lipgloss.join_vertical(:left, outer, status)
   end
 
-  def render_file_picker_status
-    parts = ["enter: select", "backspace: up dir", "~: home"]
-    parts << "esc: cancel"
-    parts.join(" | ")
+  def file_picker_thumb(path, max_w, max_h)
+    cached = @file_picker_thumb_cache[path]
+    return cached if cached
+
+    @file_picker_thumb_cache.shift if @file_picker_thumb_cache.size >= 10
+
+    thumb = render_image(path, max_w, max_h)
+    @file_picker_thumb_cache[path] = thumb if thumb
+    thumb
   end
 
   # ========== Image Rendering ==========
@@ -3684,7 +4115,11 @@ class Chewy
     right = render_right_panel
     bottom = render_bottom_bar
     body = Lipgloss.join_horizontal(:top, left, right)
-    Lipgloss.join_vertical(:left, header, body, bottom)
+    result = Lipgloss.join_vertical(:left, header, body, bottom)
+    if @confirm_apply_best_settings && @pending_best_settings_img2img
+      result += render_best_settings_popup
+    end
+    result
   end
 
   def render_header
@@ -3737,7 +4172,16 @@ class Chewy
       ""
     end
 
-    left = "#{logo}#{model_info}#{img2img_badge}"
+    controlnet_badge = if @controlnet_model_path && @provider.capabilities.controlnet
+      cn = Lipgloss::Style.new.foreground(Theme.SUCCESS).bold(true)
+      name = File.basename(@controlnet_model_path)
+      name = name[0, 15] + "..." if name.length > 18
+      " #{dim.render("\u2502")} #{cn.render("CN")} #{dim.render(name)}"
+    else
+      ""
+    end
+
+    left = "#{logo}#{model_info}#{img2img_badge}#{controlnet_badge}"
     right = dim.render("[^y] provider  [^n] models ")
 
     # Right-align the hint
@@ -4208,6 +4652,12 @@ class Chewy
       elsif key == :strength
         hint = @init_image_path ? "" : Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" (^b to set image)")
         "#{val_style.render(value.to_s)}#{hint}"
+      elsif key == :cn_model || key == :cn_image
+        hint = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" (enter to browse)")
+        "#{val_style.render(value.to_s)}#{hint}"
+      elsif key == :cn_canny
+        toggle = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+        "#{toggle.render("<")} #{val_style.render(value.to_s)} #{toggle.render(">")}"
       else
         val_style.render(value.to_s)
       end
@@ -4261,11 +4711,20 @@ class Chewy
     when :strength then "Strength "
     when :scheduler then "Schedule "
     when :threads then "Threads  "
+    when :cn_model then "CN Model "
+    when :cn_image then "CN Image "
+    when :cn_strength then "CN Str   "
+    when :cn_canny then "CN Canny "
     else key.to_s.ljust(9)
     end
   end
 
   def render_bottom_bar
+    if @confirm_apply_best_settings && @pending_best_settings_img2img
+      bar = Lipgloss::Style.new.background(Theme.SURFACE).foreground(Theme.TEXT).width(@width).padding(0, 1)
+      return bar.render("y: apply img2img settings | any key: skip")
+    end
+
     # Right side: context shortcuts
     key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
     desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
@@ -4337,7 +4796,7 @@ class Chewy
     keys << ["^x", "cancel"] if @generating
     keys << ["^e", "open"] if @last_output_path && !@generating
     keys << ["^f", "fullscreen"] if @last_output_path && !@generating
-    keys += [["^y", "provider"], ["^d", "download"], ["^a", "gallery"], ["^p", "preset"]]
+    keys += [["^y", "provider"], ["^d", "download"], ["^a", "gallery"], ["^b", "img picker"], ["^p", "preset"]]
     keys << ["^q", "quit"]
     keys
   end
@@ -4345,6 +4804,10 @@ class Chewy
   # ========== Rendering: Models Overlay ==========
 
   def render_models_content
+    if @provider.provider_type == :api
+      return render_api_models_content
+    end
+
     return Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("No models found — press d to download") if @model_paths.empty?
     return Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("Loading...") unless @model_list
 
@@ -4377,11 +4840,75 @@ class Chewy
       end
     end
 
-    "#{list_view}#{meta}"
+    result = "#{list_view}#{meta}"
+    result += render_best_settings_popup if @confirm_apply_best_settings
+    result
+  end
+
+  def render_api_models_content
+    models = @api_model_entries || @provider.list_models
+    return Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("No models available") if models.empty?
+    return Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("Loading...") unless @model_list
+
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    accent = Lipgloss::Style.new.foreground(Theme.ACCENT)
+
+    list_view = @model_list.view
+
+    # Show description for highlighted model
+    idx = @model_list.selected_index rescue 0
+    meta = ""
+    if models.any? && idx < models.length
+      m = models[idx]
+      active = m[:id] == @remote_model_id
+      active_badge = active ? accent.render(" [active]") : ""
+      meta = "\n#{dim.render(m[:desc] || "")}#{active_badge}"
+      meta += "\n#{dim.render(m[:id])}"
+    end
+
+    result = "#{list_view}#{meta}"
+    result += render_best_settings_popup if @confirm_apply_best_settings
+    result
+  end
+
+  def render_best_settings_popup
+    type = @pending_best_settings_type
+    source = @pending_best_settings_img2img ? IMG2IMG_BEST_SETTINGS : MODEL_BEST_SETTINGS
+    settings = source[type]
+    return "" unless settings
+
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    highlight = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    accent = Lipgloss::Style.new.foreground(Theme.ACCENT)
+
+    label = @pending_best_settings_img2img ? "img2img" : type
+    lines = []
+    lines << ""
+    lines << highlight.render("Apply recommended #{label} settings?")
+    lines << ""
+    parts = []
+    parts << "#{accent.render("steps")}: #{dim.render(settings["steps"].to_s)}" if settings["steps"]
+    parts << "#{accent.render("cfg")}: #{dim.render(settings["cfg_scale"].to_s)}" if settings["cfg_scale"]
+    parts << "#{accent.render("strength")}: #{dim.render(settings["strength"].to_s)}" if settings["strength"]
+    if settings["width"] && settings["height"]
+      parts << "#{accent.render("size")}: #{dim.render("#{settings["width"]}×#{settings["height"]}")}"
+    end
+    lines << "  #{parts.join("  ")}"
+    if settings["sampler"]
+      lines << "  #{accent.render("sampler")}: #{dim.render(settings["sampler"])}  #{accent.render("scheduler")}: #{dim.render(settings["scheduler"] || "")}"
+    end
+    lines.join("\n")
   end
 
   def render_models_status
-    "enter: select | f: pin | d: download | del: delete | esc: close"
+    if @confirm_apply_best_settings
+      return "y: apply settings | any key: skip"
+    end
+    if @provider.provider_type == :api
+      "enter: select | esc: close"
+    else
+      "enter: select | f: pin | d: download | del: delete | esc: close"
+    end
   end
 
   # ========== Rendering: Overlay Panels ==========
@@ -4499,14 +5026,6 @@ class Chewy
       .render(format_help_text(status_text, key_style, desc_style))
   end
 
-  def render_history_content
-    @history_list ? @history_list.view : Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("No history")
-  end
-
-  def render_history_status
-    "enter: load params | esc: close"
-  end
-
   def render_fullscreen_image
     return render_empty_preview(@width, @height) unless @fullscreen_image_path
 
@@ -4587,6 +5106,10 @@ class Chewy
     info_lines = []
     info_lines << "#{meta_key.render("File:")} #{meta_val.render(File.basename(entry[:path]))}"
     info_lines << "#{meta_key.render("Prompt:")} #{meta_val.render((meta["prompt"] || "-")[0, preview_w - 12])}" if meta["prompt"]
+    if meta["negative_prompt"] && !meta["negative_prompt"].empty?
+      info_lines << "#{meta_key.render("Negative:")} #{meta_val.render(meta["negative_prompt"][0, preview_w - 14])}"
+    end
+    info_lines << "#{meta_key.render("Provider:")} #{meta_val.render(meta["provider_name"] || meta["provider"] || "-")}" if meta["provider"]
     info_lines << "#{meta_key.render("Model:")} #{meta_val.render(File.basename(meta["model"] || "-"))}" if meta["model"]
     if meta["steps"] || meta["seed"]
       parts = []
@@ -4618,7 +5141,7 @@ class Chewy
       Lipgloss.join_vertical(:left, title_bar, body)
     )
 
-    status_text = "enter: fullscreen | ^e: open external | del: delete | j/k: navigate | esc: close"
+    status_text = "enter: fullscreen | p: load params | ^e: open external | del: delete | j/k: navigate | esc: close"
     key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
     desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
     status = Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE)
@@ -4697,11 +5220,12 @@ class Chewy
         Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" built-in") :
         Lipgloss::Style.new.foreground(Theme.SUCCESS).render(" custom")
 
-      desc_parts = [
-        "#{d['steps']}steps",
-        d['sampler'],
-        "#{d['width']}x#{d['height']}",
-      ]
+      desc_parts = []
+      desc_parts << "#{d['steps']} steps" if d['steps']
+      desc_parts << d['sampler'] if d['sampler']
+      desc_parts << "#{d['width']}x#{d['height']}" if d['width'] && d['height']
+      desc_parts << "str:#{d['strength']}" if d['strength']
+      desc_parts << "cfg:#{d['cfg_scale']}" if d['cfg_scale']
       desc = dim.render(desc_parts.join(" / "))
 
       if selected
@@ -5137,6 +5661,91 @@ def check_for_updates
   (latest_parts <=> current_parts) > 0 ? latest : nil
 rescue
   nil
+end
+
+# ---------- CLI Helpers ----------
+
+def cli_output_dir
+  config = File.exist?(CONFIG_PATH) ? (YAML.safe_load(File.read(CONFIG_PATH)) || {}) : {}
+  ENV["CHEWY_OUTPUT_DIR"] || config["output_dir"] || "outputs"
+end
+
+def cli_list_images
+  dir = cli_output_dir
+  unless File.directory?(dir)
+    puts "No output directory found at #{dir}"
+    exit 0
+  end
+
+  pngs = Dir.glob(File.join(dir, "*.png")).sort.reverse
+  if pngs.empty?
+    puts "No images found in #{dir}"
+    exit 0
+  end
+
+  puts "\e[1;35mImages in #{dir}\e[0m (#{pngs.length} total)\n\n"
+  pngs.each_with_index do |png, i|
+    json = png.sub(/\.png$/, ".json")
+    meta = File.exist?(json) ? (JSON.parse(File.read(json)) rescue {}) : {}
+    prompt = (meta["prompt"] || "")[0, 60]
+    model = meta["model"] ? File.basename(meta["model"]) : nil
+    seed = meta["seed"]
+
+    idx = "\e[1;35m#{i + 1}.\e[0m"
+    name = "\e[1m#{File.basename(png)}\e[0m"
+    details = [model, seed ? "seed:#{seed}" : nil].compact.join(" | ")
+    puts "  #{idx} #{name}"
+    puts "     #{prompt}" unless prompt.empty?
+    puts "     \e[2m#{details}\e[0m" unless details.empty?
+    puts ""
+  end
+end
+
+def cli_delete_image(target)
+  dir = cli_output_dir
+  # Allow bare filename or full path
+  path = File.exist?(target) ? target : File.join(dir, target)
+
+  unless File.exist?(path)
+    puts "\e[31mFile not found:\e[0m #{target}"
+    exit 1
+  end
+
+  json = path.sub(/\.png$/, ".json")
+  print "Delete #{File.basename(path)}? [y/N] "
+  answer = $stdin.gets&.strip&.downcase
+  unless answer == "y"
+    puts "Cancelled."
+    exit 0
+  end
+
+  File.delete(path) if File.exist?(path)
+  File.delete(json) if File.exist?(json)
+  puts "\e[32mDeleted\e[0m #{File.basename(path)}"
+end
+
+case ARGV[0]
+when "list", "ls"
+  cli_list_images
+  exit 0
+when "delete", "rm"
+  if ARGV[1].nil?
+    puts "Usage: chewy delete <filename>"
+    puts "       chewy list    # to see available images"
+    exit 1
+  end
+  cli_delete_image(ARGV[1])
+  exit 0
+when "--help", "-h", "help"
+  print_logo
+  puts "\e[1;35mchewy v#{CHEWY_VERSION}\e[0m — local AI image generation TUI\n\n"
+  puts "Usage: chewy [command]\n\n"
+  puts "Commands:"
+  puts "  (none)          Launch the TUI"
+  puts "  list, ls        List all generated images"
+  puts "  delete, rm FILE Delete a generated image"
+  puts "  help, --help    Show this help\n\n"
+  exit 0
 end
 
 # ---------- Entrypoint ----------
