@@ -4138,13 +4138,13 @@ class Chewy
     # Check if chip is already in the text
     pattern = /(?:^|,\s*|\s+)#{Regexp.escape(chip)}(?:,\s*|\s*$)/i
     if current.match?(pattern)
-      # Remove it
       result = current.sub(/,?\s*#{Regexp.escape(chip)}/i, "").sub(/\A[,\s]+/, "").sub(/[,\s]+\z/, "")
       input.value = result
     else
       sep = current.strip.empty? ? "" : ", "
       input.value = "#{current.strip}#{sep}#{chip}"
     end
+    input.cursor_end
     true
   end
 
