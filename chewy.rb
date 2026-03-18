@@ -5310,32 +5310,64 @@ class Chewy
     end
   end
 
+  COLLAPSED_H = 1  # height for unfocused sections in narrow mode
+
   def left_panel_heights
     body_h = @height - 2  # header + bottom bar
-    # In narrow (stacked) mode, cap left panel to ~55% of body to leave room for preview
-    max_h = narrow? ? [(body_h * 0.55).to_i, 10].max : body_h
 
+    if narrow?
+      # In narrow (stacked) mode, unfocused sections collapse to 1 row
+      max_h = [(body_h * 0.55).to_i, 10].max
+      params_h = @focus == FOCUS_PARAMS ? [@param_display_keys.length + 4, (max_h * 0.6).to_i].max : 3
+
+      case @focus
+      when FOCUS_PROMPT
+        negative_h = COLLAPSED_H
+        prompt_h = [max_h - negative_h - params_h, 4].max
+      when FOCUS_NEGATIVE
+        prompt_h = COLLAPSED_H
+        negative_h = [max_h - prompt_h - params_h, 4].max
+      when FOCUS_PARAMS
+        prompt_h = COLLAPSED_H
+        negative_h = COLLAPSED_H
+        params_h = [max_h - prompt_h - negative_h, params_h].min
+      else
+        prompt_h = COLLAPSED_H
+        negative_h = COLLAPSED_H
+      end
+
+      # Clamp total
+      total = prompt_h + negative_h + params_h
+      if total > max_h
+        overflow = total - max_h
+        case @focus
+        when FOCUS_PROMPT
+          prompt_h = [prompt_h - overflow, 3].max
+        when FOCUS_NEGATIVE
+          negative_h = [negative_h - overflow, 3].max
+        else
+          params_h = [params_h - overflow, 3].max
+        end
+      end
+
+      return [prompt_h, negative_h, params_h]
+    end
+
+    # Wide layout — original logic
     if @focus == FOCUS_PARAMS
-      # Expanded: label + separator + N params + 2 border lines
       params_min = @param_display_keys.length + 4
       params_h = [params_min, (body_h * 0.30).to_i].max
     else
-      # Compact: border + 1 line of inline params + border
       params_h = 3
     end
 
-    min_remaining = narrow? ? 4 : 8
-    min_prompt = narrow? ? 3 : 5
-    min_negative = narrow? ? 2 : 4
-    remaining = [max_h - params_h, min_remaining].max
-    prompt_h = [(remaining * 0.6).to_i, min_prompt].max
-    negative_h = [remaining - prompt_h, min_negative].max
+    remaining = [body_h - params_h, 8].max
+    prompt_h = [(remaining * 0.6).to_i, 5].max
+    negative_h = [remaining - prompt_h, 4].max
 
-    # Rebalance if we overshot — shrink sections to fit max_h
     total = prompt_h + negative_h + params_h
-    if total > max_h
-      overflow = total - max_h
-      # Shrink prompt first, then negative, then params
+    if total > body_h
+      overflow = total - body_h
       shrink = [overflow, prompt_h - 3].min
       prompt_h -= shrink; overflow -= shrink
       shrink = [overflow, negative_h - 2].min
@@ -5639,6 +5671,16 @@ class Chewy
   def render_prompt_section(tw, box_h)
     focused = @focus == FOCUS_PROMPT
 
+    # Narrow collapsed: single summary line
+    if narrow? && !focused && box_h <= COLLAPSED_H
+      dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+      val = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+      preview = @prompt_input.value.strip
+      preview = preview.empty? ? "empty" : preview[0, tw - 12]
+      return Lipgloss::Style.new.width(tw).background(Theme.SURFACE)
+        .render(" #{dim.render("Prompt:")} #{val.render(preview)}")
+    end
+
     label_style = Lipgloss::Style.new.foreground(focused ? Theme.PRIMARY : Theme.TEXT_DIM).bold(focused)
     label = label_style.render("Prompt")
 
@@ -5651,8 +5693,8 @@ class Chewy
       ""
     end
 
-    chips_line = if focused
-      # absolute Y: outer_pad(1) + header(1) + border(1) + label(1) + prompt_lines calculated below + lora + blank
+    # Skip chips in narrow mode to save space
+    chips_line = if focused && !narrow?
       render_chips(PROMPT_CHIPS, tw - 6, @prompt_input.value, target: :prompt)
     else
       ""
@@ -5677,10 +5719,21 @@ class Chewy
   def render_negative_section(tw, box_h)
     focused = @focus == FOCUS_NEGATIVE
 
+    # Narrow collapsed: single summary line
+    if narrow? && !focused && box_h <= COLLAPSED_H
+      dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+      val = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+      preview = @negative_input.value.strip
+      preview = preview.empty? ? "empty" : preview[0, tw - 14]
+      return Lipgloss::Style.new.width(tw).background(Theme.SURFACE)
+        .render(" #{dim.render("Negative:")} #{val.render(preview)}")
+    end
+
     label_style = Lipgloss::Style.new.foreground(focused ? Theme.ACCENT : Theme.TEXT_DIM).bold(focused)
     label = label_style.render("Negative Prompt")
 
-    chips_line = if focused
+    # Skip chips in narrow mode to save space
+    chips_line = if focused && !narrow?
       render_chips(NEGATIVE_CHIPS, tw - 6, @negative_input.value, target: :negative)
     else
       ""
