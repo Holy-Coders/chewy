@@ -1366,9 +1366,8 @@ class Chewy
     @preview_cache = nil
     @preview_path = nil
 
-    # Chip click positions (set during render)
-    @prompt_chips_y = nil
-    @negative_chips_y = nil
+    # Chip click map: [{y:, x_start:, x_end:, chip:, target: :prompt/:negative}]
+    @chip_hit_map = []
 
     # Progressive reveal animation
     @reveal_phase = nil  # nil = no animation, 0-4 = progressive phases
@@ -1610,6 +1609,7 @@ class Chewy
 
   def view
     apply_theme_styles
+    @chip_hit_map = []
 
     # Shrink dimensions for padding: 2 chars left/right, 1 line top/bottom
     saved_w = @width; saved_h = @height
@@ -1994,11 +1994,7 @@ class Chewy
           @prompt_input.focus
           @negative_input.blur
         end
-        # Check if clicking a chip — use absolute Y
-        if @focus == FOCUS_PROMPT && @prompt_chips_y && y >= @prompt_chips_y
-          chip_row = y - @prompt_chips_y
-          toggle_chip_at(@prompt_input, PROMPT_CHIPS, cx - 2, chip_row, lw - 6)
-        end
+        handle_chip_click(x, y)
       elsif body_y < prompt_h + negative_h
         # Negative prompt section
         unless @focus == FOCUS_NEGATIVE
@@ -2006,11 +2002,7 @@ class Chewy
           @negative_input.focus
           @prompt_input.blur
         end
-        # Check if clicking a chip — use absolute Y
-        if @focus == FOCUS_NEGATIVE && @negative_chips_y && y >= @negative_chips_y
-          chip_row = y - @negative_chips_y
-          toggle_chip_at(@negative_input, NEGATIVE_CHIPS, cx - 2, chip_row, lw - 6)
-        end
+        handle_chip_click(x, y)
       else
         # Params section
         was_focused = @focus == FOCUS_PARAMS
@@ -4054,11 +4046,11 @@ class Chewy
     end
 
     chips_line = if focused
-      render_chips(PROMPT_CHIPS, tw - 6, @prompt_input.value)
+      # absolute Y: outer_pad(1) + header(1) + border(1) + label(1) + prompt_lines calculated below + lora + blank
+      render_chips(PROMPT_CHIPS, tw - 6, @prompt_input.value, target: :prompt)
     else
       ""
     end
-    # +2 for blank line above chips + chips content
     extra_lines = lora_tags.count("\n") + (chips_line.empty? ? 0 : chips_line.count("\n") + 2)
 
     prompt_lines = [box_h - 4 - extra_lines, 1].max
@@ -4066,8 +4058,8 @@ class Chewy
     content = "#{label}\n#{prompt_view}#{lora_tags}"
     unless chips_line.empty?
       content += "\n\n#{chips_line}"
-      # Store absolute Y where chips start: padding(1) + header(1) + border(1) + label(1) + prompt_lines + lora_lines + blank
-      @prompt_chips_y = 1 + 1 + 1 + 1 + prompt_lines + lora_tags.count("\n") + 1
+      chips_base_y = 1 + 1 + 1 + 1 + prompt_lines + lora_tags.count("\n") + 1
+      register_chip_hits(PROMPT_CHIPS, tw - 6, @prompt_input.value, chips_base_y, :prompt)
     end
 
     border_color = focused ? gradient_border_color : Theme.BORDER_DIM
@@ -4082,7 +4074,7 @@ class Chewy
     label = label_style.render("Negative Prompt")
 
     chips_line = if focused
-      render_chips(NEGATIVE_CHIPS, tw - 6, @negative_input.value)
+      render_chips(NEGATIVE_CHIPS, tw - 6, @negative_input.value, target: :negative)
     else
       ""
     end
@@ -4093,8 +4085,9 @@ class Chewy
     content = "#{label}\n#{negative_view}"
     unless chips_line.empty?
       content += "\n\n#{chips_line}"
-      prompt_h, _, _ = left_panel_heights
-      @negative_chips_y = 1 + 1 + prompt_h + 1 + 1 + negative_lines + 1
+      p_h, _, _ = left_panel_heights
+      chips_base_y = 1 + 1 + p_h + 1 + 1 + negative_lines + 1
+      register_chip_hits(NEGATIVE_CHIPS, tw - 6, @negative_input.value, chips_base_y, :negative)
     end
 
     border_color = focused ? gradient_border_color : Theme.BORDER_DIM
@@ -4104,41 +4097,56 @@ class Chewy
 
   CHIP_GAP = 2  # spaces between chips
 
-  def toggle_chip_at(input, chips, click_x, click_row, max_w)
-    # Replay the layout to find which chip was clicked
+  def register_chip_hits(chips, max_w, current_text, base_y, target)
+    # Build hit map by replaying the same layout logic as render_chips
     current_x = 0; row = 0
+    # +3 for border(1) + left padding in box(1) + 1 extra
+    x_offset = 3
     chips.each do |chip|
-      chip_w = chip.length + 2  # " chip " rendered width
-      if current_x + chip_w > max_w && current_x > 0
+      chip_w = chip.length + 2  # " chip " visible width
+      needed = current_x == 0 ? chip_w : current_x + CHIP_GAP + chip_w
+      if needed > max_w && current_x > 0
         row += 1; current_x = 0
       end
-      if row == click_row && click_x >= current_x && click_x < current_x + chip_w
-        # Toggle this chip
-        current = input.value
-        words = current.downcase.split(/[,\s]+/)
-        chip_key = chip.downcase
-        if words.any? { |w| chip_key.start_with?(w) || w == chip_key.split.first }
-          # Remove — match the full chip text
-          pattern = /,?\s*#{Regexp.escape(chip)}\s*/i
-          result = current.sub(pattern, "").sub(/\A[,\s]+/, "").sub(/[,\s]+\z/, "")
-          input.value = result
-        else
-          sep = current.strip.empty? ? "" : ", "
-          input.value = "#{current.strip}#{sep}#{chip}"
-        end
-        return
-      end
+      @chip_hit_map << {
+        y: base_y + row,
+        x_start: x_offset + current_x,
+        x_end: x_offset + current_x + chip_w - 1,
+        chip: chip,
+        target: target,
+      }
       current_x += chip_w + CHIP_GAP
     end
   end
 
-  def render_chips(chips, max_w, current_text)
+  def handle_chip_click(x, y)
+    hit = @chip_hit_map.find { |h| h[:y] == y && x >= h[:x_start] && x <= h[:x_end] }
+    return false unless hit
+
+    input = hit[:target] == :prompt ? @prompt_input : @negative_input
+    current = input.value
+    chip = hit[:chip]
+
+    # Check if chip is already in the text
+    pattern = /(?:^|,\s*|\s+)#{Regexp.escape(chip)}(?:,\s*|\s*$)/i
+    if current.match?(pattern)
+      # Remove it
+      result = current.sub(/,?\s*#{Regexp.escape(chip)}/i, "").sub(/\A[,\s]+/, "").sub(/[,\s]+\z/, "")
+      input.value = result
+    else
+      sep = current.strip.empty? ? "" : ", "
+      input.value = "#{current.strip}#{sep}#{chip}"
+    end
+    true
+  end
+
+  def render_chips(chips, max_w, current_text, target: nil)
     active = Lipgloss::Style.new.background(Theme.PRIMARY).foreground(Theme.SURFACE).bold(true)
     inactive = Lipgloss::Style.new.background(Theme.BORDER_DIM).foreground(Theme.TEXT_DIM)
-    words = current_text.downcase.split(/[,\s]+/)
 
     rendered = chips.map do |chip|
-      used = words.any? { |w| chip.downcase.start_with?(w) || w == chip.downcase.split.first }
+      pattern = /(?:^|,\s*|\s+)#{Regexp.escape(chip)}(?:,|\s|$)/i
+      used = current_text.match?(pattern)
       style = used ? active : inactive
       style.render(" #{chip} ")
     end
