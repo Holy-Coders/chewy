@@ -4064,7 +4064,8 @@ class Chewy
     content = "#{label}\n#{prompt_view}#{lora_tags}"
     unless chips_line.empty?
       content += "\n\n#{chips_line}"
-      chips_base_y = 1 + 1 + 1 + 1 + prompt_lines + lora_tags.count("\n") + 1
+      actual_lines = prompt_view.count("\n") + 1
+      chips_base_y = 1 + 1 + 1 + 1 + actual_lines + lora_tags.count("\n") + 1
       register_chip_hits(PROMPT_CHIPS, tw - 6, @prompt_input.value, chips_base_y, :prompt)
     end
 
@@ -4092,7 +4093,8 @@ class Chewy
     unless chips_line.empty?
       content += "\n\n#{chips_line}"
       p_h, _, _ = left_panel_heights
-      chips_base_y = 1 + 1 + p_h + 1 + 1 + negative_lines + 1
+      actual_lines = negative_view.count("\n") + 1
+      chips_base_y = 1 + 1 + p_h + 1 + 1 + actual_lines + 1
       register_chip_hits(NEGATIVE_CHIPS, tw - 6, @negative_input.value, chips_base_y, :negative)
     end
 
