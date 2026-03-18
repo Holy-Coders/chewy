@@ -1959,16 +1959,24 @@ class Chewy
     x = message.x
     y = message.y
 
+    # Check chip clicks first — uses absolute coordinates stored during render
+    return [self, nil] if handle_chip_click(x, y)
+
     # Account for padding: 2 chars left, 1 line top
     cx = x - 2
     cy = y - 1
 
+    # Use shrunk dimensions to match render (view subtracts 4 from width, 2 from height)
+    view_w = @width - 4
+    view_h = @height - 2
+    saved_w, saved_h = @width, @height
+    @width, @height = view_w, view_h
     lw = left_panel_width
     prompt_h, negative_h, params_h = left_panel_heights
+    @width, @height = saved_w, saved_h
 
     # Header row (row 0 of content)
     if cy == 0
-      # Click on header — open provider overlay if clicking right side
       header_mid = lw
       if cx >= header_mid
         return toggle_overlay(:provider)
@@ -1978,8 +1986,8 @@ class Chewy
     end
 
     # Bottom bar (last content row)
-    if cy >= @height - 3
-      return [self, nil] # bottom bar clicks could be added later
+    if cy >= view_h - 1
+      return [self, nil]
     end
 
     # Body area
@@ -1994,7 +2002,6 @@ class Chewy
           @prompt_input.focus
           @negative_input.blur
         end
-        handle_chip_click(x, y)
       elsif body_y < prompt_h + negative_h
         # Negative prompt section
         unless @focus == FOCUS_NEGATIVE
@@ -2002,7 +2009,6 @@ class Chewy
           @negative_input.focus
           @prompt_input.blur
         end
-        handle_chip_click(x, y)
       else
         # Params section
         was_focused = @focus == FOCUS_PARAMS
