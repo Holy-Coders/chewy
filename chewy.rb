@@ -1366,6 +1366,10 @@ class Chewy
     @preview_cache = nil
     @preview_path = nil
 
+    # Chip click positions (set during render)
+    @prompt_chips_y = nil
+    @negative_chips_y = nil
+
     # Progressive reveal animation
     @reveal_phase = nil  # nil = no animation, 0-4 = progressive phases
     @reveal_path = nil
@@ -1990,10 +1994,10 @@ class Chewy
           @prompt_input.focus
           @negative_input.blur
         end
-        # Check if clicking a chip (bottom rows of prompt section)
-        chip_row = body_y - 2  # offset for border + label
-        if @focus == FOCUS_PROMPT && chip_row >= prompt_h - 4
-          toggle_chip_at(@prompt_input, PROMPT_CHIPS, cx - 3, chip_row - (prompt_h - 4), left_panel_width - 6)
+        # Check if clicking a chip — use absolute Y
+        if @focus == FOCUS_PROMPT && @prompt_chips_y && y >= @prompt_chips_y
+          chip_row = y - @prompt_chips_y
+          toggle_chip_at(@prompt_input, PROMPT_CHIPS, cx - 2, chip_row, lw - 6)
         end
       elsif body_y < prompt_h + negative_h
         # Negative prompt section
@@ -2002,11 +2006,10 @@ class Chewy
           @negative_input.focus
           @prompt_input.blur
         end
-        # Check if clicking a chip
-        local_y = body_y - prompt_h
-        chip_row = local_y - 2
-        if @focus == FOCUS_NEGATIVE && chip_row >= negative_h - 4
-          toggle_chip_at(@negative_input, NEGATIVE_CHIPS, cx - 3, chip_row - (negative_h - 4), left_panel_width - 6)
+        # Check if clicking a chip — use absolute Y
+        if @focus == FOCUS_NEGATIVE && @negative_chips_y && y >= @negative_chips_y
+          chip_row = y - @negative_chips_y
+          toggle_chip_at(@negative_input, NEGATIVE_CHIPS, cx - 2, chip_row, lw - 6)
         end
       else
         # Params section
@@ -4055,12 +4058,17 @@ class Chewy
     else
       ""
     end
-    extra_lines = lora_tags.count("\n") + (chips_line.empty? ? 0 : chips_line.count("\n") + 1)
+    # +2 for blank line above chips + chips content
+    extra_lines = lora_tags.count("\n") + (chips_line.empty? ? 0 : chips_line.count("\n") + 2)
 
     prompt_lines = [box_h - 4 - extra_lines, 1].max
     prompt_view = render_wrapped_input(@prompt_input, max_lines: prompt_lines)
     content = "#{label}\n#{prompt_view}#{lora_tags}"
-    content += "\n#{chips_line}" unless chips_line.empty?
+    unless chips_line.empty?
+      content += "\n\n#{chips_line}"
+      # Store absolute Y where chips start: padding(1) + header(1) + border(1) + label(1) + prompt_lines + lora_lines + blank
+      @prompt_chips_y = 1 + 1 + 1 + 1 + prompt_lines + lora_tags.count("\n") + 1
+    end
 
     border_color = focused ? gradient_border_color : Theme.BORDER_DIM
     Lipgloss::Style.new.border(:rounded).border_foreground(border_color).background(Theme.SURFACE)
@@ -4078,12 +4086,16 @@ class Chewy
     else
       ""
     end
-    extra_lines = chips_line.empty? ? 0 : chips_line.count("\n") + 1
+    extra_lines = chips_line.empty? ? 0 : chips_line.count("\n") + 2
 
     negative_lines = [box_h - 3 - extra_lines, 1].max
     negative_view = render_wrapped_input(@negative_input, max_lines: negative_lines)
     content = "#{label}\n#{negative_view}"
-    content += "\n#{chips_line}" unless chips_line.empty?
+    unless chips_line.empty?
+      content += "\n\n#{chips_line}"
+      prompt_h, _, _ = left_panel_heights
+      @negative_chips_y = 1 + 1 + prompt_h + 1 + 1 + negative_lines + 1
+    end
 
     border_color = focused ? gradient_border_color : Theme.BORDER_DIM
     Lipgloss::Style.new.border(:rounded).border_foreground(border_color).background(Theme.SURFACE)
