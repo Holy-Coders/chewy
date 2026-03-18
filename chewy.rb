@@ -2290,7 +2290,8 @@ class Chewy
     lw = left_panel_width
     @prompt_input.width = lw - 6
     @negative_input.width = lw - 6
-    @progress = Bubbles::Progress.new(width: [right_panel_width - 10, 20].max, gradient: [Theme.PRIMARY, Theme.ACCENT])
+    progress_w = narrow? ? [@width - 10, 20].max : [right_panel_width - 10, 20].max
+    @progress = Bubbles::Progress.new(width: progress_w, gradient: [Theme.PRIMARY, Theme.ACCENT])
     @model_list.width = @width - 12 if @model_list
     @model_list.height = [@height - 10, 6].max if @model_list
     @preview_cache = nil # invalidate on resize
@@ -2305,8 +2306,11 @@ class Chewy
     @file_list&.width = w; @file_list&.height = h
   end
 
-  def left_panel_width = [(@width * 0.45).to_i, 36].max
-  def right_panel_width = @width - left_panel_width
+  NARROW_THRESHOLD = 76  # inner width; corresponds to ~80 col terminal
+
+  def narrow? = @width < NARROW_THRESHOLD
+  def left_panel_width = narrow? ? @width : [(@width * 0.45).to_i, 36].max
+  def right_panel_width = narrow? ? @width : @width - left_panel_width
 
   # ========== Focus ==========
 
@@ -2370,8 +2374,13 @@ class Chewy
 
     # Body area
     body_y = cy - 1  # offset for header
+    left_h = prompt_h + negative_h + params_h
 
-    if cx < lw
+    # Determine if click is in left panel vs right/preview panel
+    in_left_panel = narrow? ? (body_y < left_h) : (cx < lw)
+    in_preview = narrow? ? (body_y >= left_h) : (cx >= lw)
+
+    if in_left_panel
       # Left panel clicks
       if body_y < prompt_h
         # Prompt section
@@ -2419,8 +2428,8 @@ class Chewy
           end
         end
       end
-    else
-      # Right panel clicks — preview area
+    elsif in_preview
+      # Preview area clicks — open fullscreen
       if @last_output_path && !@generating
         show_fullscreen_image(@last_output_path)
       end
@@ -2501,7 +2510,12 @@ class Chewy
     when "ctrl+f" then show_fullscreen_image(@last_output_path) if @last_output_path; return [self, nil]
     when "ctrl+r" then @params[:seed] = -1; return [self, nil]
     when "ctrl+b" then return open_file_picker                  # b = browse init image
-    when "ctrl+v" then return paste_image_from_clipboard        # v = paste image
+    when "ctrl+v"                                                # v = paste
+      case @focus
+      when FOCUS_PROMPT   then return paste_text_into(@prompt_input)
+      when FOCUS_NEGATIVE then return paste_text_into(@negative_input)
+      else return paste_image_from_clipboard
+      end
     when "ctrl+u"
       unless @focus == FOCUS_PROMPT || @focus == FOCUS_NEGATIVE
         @init_image_path = nil; return [self, set_status_toast("Init image cleared")]
@@ -3621,6 +3635,7 @@ class Chewy
 
   def handle_download_search_key(message)
     key = message.to_s
+    return paste_text_into(@download_search_input) if key == "ctrl+v"
     if key == "enter"
       query = @download_search_input.value.strip
       if @download_source == :civitai
@@ -4202,6 +4217,7 @@ class Chewy
 
   def handle_lora_search_key(message)
     key = message.to_s
+    return paste_text_into(@lora_search_input) if key == "ctrl+v"
     if key == "enter"
       query = @lora_search_input.value.strip
       if @lora_download_source == :civitai
@@ -4505,6 +4521,31 @@ class Chewy
     [self, cmd]
   end
 
+  # Read text from the system clipboard
+  def read_clipboard_text
+    if RUBY_PLATFORM.include?("darwin")
+      `pbpaste 2>/dev/null`.strip rescue ""
+    else
+      text = `wl-paste --no-newline 2>/dev/null`.strip rescue ""
+      return text unless text.empty?
+      text = `xclip -selection clipboard -o 2>/dev/null`.strip rescue ""
+      return text unless text.empty?
+      `xsel --clipboard --output 2>/dev/null`.strip rescue ""
+    end
+  end
+
+  # Paste text from clipboard into the given input at its cursor position
+  def paste_text_into(input)
+    clip = read_clipboard_text
+    return [self, nil] if clip.empty?
+
+    current = input.value
+    pos = input.position
+    input.value = current[0...pos].to_s + clip + current[pos..].to_s
+    input.position = pos + clip.length
+    [self, set_status_toast("Pasted #{clip.length} chars")]
+  end
+
   def scan_file_picker_dir
     entries = []
     # Parent directory entry
@@ -4610,8 +4651,8 @@ class Chewy
     end
 
     inner_h = @height - 6
-    list_w = [(@width * 0.4).to_i, 30].max
-    preview_w = @width - list_w - 8
+    list_w = narrow? ? @width - 4 : [(@width * 0.4).to_i, 30].max
+    preview_w = narrow? ? 0 : @width - list_w - 8
 
     # -- Left: file list --
     dir_label = @file_picker_dir
@@ -4655,37 +4696,41 @@ class Chewy
       .width(list_w).height(inner_h).padding(0, 1)
       .render(list_content)
 
-    # -- Right: preview --
-    entry = @file_picker_entries[@file_picker_index]
-    preview_content = if entry && entry[:type] == :file && @file_picker_target != :cn_model
-      thumb = file_picker_thumb(entry[:path], preview_w - 4, inner_h - 4)
-      if thumb
-        info = dim.render(entry[:name])
-        thumb + "\n" + info
+    if narrow?
+      body = list_panel
+    else
+      # -- Right: preview --
+      entry = @file_picker_entries[@file_picker_index]
+      preview_content = if entry && entry[:type] == :file && @file_picker_target != :cn_model
+        thumb = file_picker_thumb(entry[:path], preview_w - 4, inner_h - 4)
+        if thumb
+          info = dim.render(entry[:name])
+          thumb + "\n" + info
+        else
+          dim.render("(no preview)")
+        end
+      elsif entry && entry[:type] == :file && @file_picker_target == :cn_model
+        size_str = format_bytes(entry[:size] || 0)
+        "#{dim.render(entry[:name])}\n#{dim.render(size_str)}"
+      elsif entry && entry[:type] == :dir
+        dim.render("Directory")
       else
         dim.render("(no preview)")
       end
-    elsif entry && entry[:type] == :file && @file_picker_target == :cn_model
-      size_str = format_bytes(entry[:size] || 0)
-      "#{dim.render(entry[:name])}\n#{dim.render(size_str)}"
-    elsif entry && entry[:type] == :dir
-      dim.render("Directory")
-    else
-      dim.render("(no preview)")
-    end
 
-    preview_panel = Lipgloss::Style.new
-      .border(:rounded).border_foreground(Theme.BORDER_DIM).background(Theme.SURFACE)
-      .width(preview_w).height(inner_h).padding(0, 1)
-      .render(preview_content)
+      preview_panel = Lipgloss::Style.new
+        .border(:rounded).border_foreground(Theme.BORDER_DIM).background(Theme.SURFACE)
+        .width(preview_w).height(inner_h).padding(0, 1)
+        .render(preview_content)
 
-    body = Lipgloss.join_horizontal(:top, list_panel, preview_panel)
+      body = Lipgloss.join_horizontal(:top, list_panel, preview_panel)
 
-    # Register kitty overlay for file picker thumbnail
-    if @kitty_graphics && entry && entry[:type] == :file && @file_picker_target != :cn_model && File.exist?(entry[:path])
-      picker_img_row = 1 + 1 + 1 + 1
-      picker_img_col = 2 + 1 + list_w + 1 + 1
-      @kitty_overlay_pending = { path: entry[:path], row: picker_img_row, col: picker_img_col, w: preview_w - 4, h: inner_h - 4, slot: 22 }
+      # Register kitty overlay for file picker thumbnail
+      if @kitty_graphics && entry && entry[:type] == :file && @file_picker_target != :cn_model && File.exist?(entry[:path])
+        picker_img_row = 1 + 1 + 1 + 1
+        picker_img_col = 2 + 1 + list_w + 1 + 1
+        @kitty_overlay_pending = { path: entry[:path], row: picker_img_row, col: picker_img_col, w: preview_w - 4, h: inner_h - 4, slot: 22 }
+      end
     end
 
     picker_title = case @file_picker_target
@@ -5139,10 +5184,18 @@ class Chewy
 
   def render_main_view
     header = render_header
-    left = render_left_panel
-    right = render_right_panel
     bottom = render_bottom_bar
-    body = Lipgloss.join_horizontal(:top, left, right)
+
+    if narrow?
+      left = render_left_panel
+      preview = render_narrow_preview
+      body = Lipgloss.join_vertical(:left, left, preview)
+    else
+      left = render_left_panel
+      right = render_right_panel
+      body = Lipgloss.join_horizontal(:top, left, right)
+    end
+
     result = Lipgloss.join_vertical(:left, header, body, bottom)
     if @confirm_apply_best_settings && @pending_best_settings_img2img
       result += render_best_settings_popup
@@ -5155,17 +5208,26 @@ class Chewy
 
     # Register kitty overlay for main preview — must match render_image_preview dimensions
     if @kitty_graphics && !@generating && @last_output_path && File.exist?(@last_output_path) && @reveal_phase.nil?
-      rw = right_panel_width
       prompt_h, negative_h, params_h = left_panel_heights
       total_left = prompt_h + negative_h + params_h
       body_h = @height - 2
-      total_left = [total_left, body_h].min
-      # These match render_right_panel: render_image_preview(rw - 2, total_left)
-      img_w = rw - 2
-      img_h = [total_left - IMAGE_PAD_Y * 2, 1].max
-      # Terminal position (1-based): outer padding (2 cols, 1 row) + left panel + right panel padding (1 col)
-      img_col = 2 + left_panel_width + 1 + 1  # outer_pad_left + left_panel + right_panel_pad_left (1-based)
-      img_row = 1 + 1 + IMAGE_PAD_Y  # outer_pad_top + header + image_pad_top
+
+      if narrow?
+        preview_h = [body_h - total_left, 3].max
+        img_w = @width - 2
+        img_h = [preview_h - 2, 1].max
+        img_col = 2 + 1 + 1  # outer_pad_left + padding (1-based)
+        img_row = 1 + 1 + total_left + 1  # outer_pad_top + header + left_panel + padding
+      else
+        rw = right_panel_width
+        total_left = [total_left, body_h].min
+        img_w = rw - 2
+        img_h = [total_left - IMAGE_PAD_Y * 2, 1].max
+        # Terminal position (1-based): outer padding (2 cols, 1 row) + left panel + right panel padding (1 col)
+        img_col = 2 + left_panel_width + 1 + 1  # outer_pad_left + left_panel + right_panel_pad_left (1-based)
+        img_row = 1 + 1 + IMAGE_PAD_Y  # outer_pad_top + header + image_pad_top
+      end
+
       @kitty_overlay_pending = { path: @last_output_path, row: img_row, col: img_col, w: img_w, h: img_h, slot: 20 }
     end
 
@@ -5232,18 +5294,26 @@ class Chewy
     end
 
     left = "#{logo}#{model_info}#{img2img_badge}#{controlnet_badge}"
-    right = dim.render("[^y] provider  [^n] models  [^l] loras ")
 
-    # Right-align the hint
-    left_visible = left.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
-    right_visible = right.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
-    gap = [@width - left_visible - right_visible, 1].max
+    if narrow?
+      # Truncate left content to fit and skip right-side hints
+      Lipgloss::Style.new.width(@width).max_width(@width).background(Theme.SURFACE).render(left)
+    else
+      right = dim.render("[^y] provider  [^n] models  [^l] loras ")
 
-    Lipgloss::Style.new.width(@width).background(Theme.SURFACE).render("#{left}#{' ' * gap}#{right}")
+      # Right-align the hint
+      left_visible = left.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
+      right_visible = right.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
+      gap = [@width - left_visible - right_visible, 1].max
+
+      Lipgloss::Style.new.width(@width).background(Theme.SURFACE).render("#{left}#{' ' * gap}#{right}")
+    end
   end
 
   def left_panel_heights
     body_h = @height - 2  # header + bottom bar
+    # In narrow (stacked) mode, cap left panel to ~55% of body to leave room for preview
+    max_h = narrow? ? [(body_h * 0.55).to_i, 10].max : body_h
 
     if @focus == FOCUS_PARAMS
       # Expanded: label + separator + N params + 2 border lines
@@ -5254,14 +5324,17 @@ class Chewy
       params_h = 3
     end
 
-    remaining = [body_h - params_h, 8].max
-    prompt_h = [(remaining * 0.6).to_i, 5].max
-    negative_h = [remaining - prompt_h, 4].max
+    min_remaining = narrow? ? 4 : 8
+    min_prompt = narrow? ? 3 : 5
+    min_negative = narrow? ? 2 : 4
+    remaining = [max_h - params_h, min_remaining].max
+    prompt_h = [(remaining * 0.6).to_i, min_prompt].max
+    negative_h = [remaining - prompt_h, min_negative].max
 
-    # Rebalance if we overshot — shrink sections to fit body_h
+    # Rebalance if we overshot — shrink sections to fit max_h
     total = prompt_h + negative_h + params_h
-    if total > body_h
-      overflow = total - body_h
+    if total > max_h
+      overflow = total - max_h
       # Shrink prompt first, then negative, then params
       shrink = [overflow, prompt_h - 3].min
       prompt_h -= shrink; overflow -= shrink
@@ -5305,6 +5378,28 @@ class Chewy
     Lipgloss::Style.new
       .background(Theme.SURFACE)
       .width(rw - 2).height(total_left).padding(IMAGE_PAD_Y, 1).render(content)
+  end
+
+  # Stacked preview panel for narrow/mobile layout
+  def render_narrow_preview
+    prompt_h, negative_h, params_h = left_panel_heights
+    left_h = prompt_h + negative_h + params_h
+    body_h = @height - 2
+    preview_h = [body_h - left_h, 3].max
+    pw = @width
+    img_h = [preview_h - 2, 1].max  # 1 row padding top/bottom
+
+    content = if @generating
+      render_generating_preview(pw - 2, img_h)
+    elsif @last_output_path && File.exist?(@last_output_path)
+      render_image_preview(pw - 2, img_h)
+    else
+      render_empty_preview(pw - 2, img_h)
+    end
+
+    Lipgloss::Style.new
+      .background(Theme.SURFACE)
+      .width(pw).height(preview_h).padding(1, 1).render(content)
   end
 
   def render_image_preview(max_w, max_h)
@@ -5839,6 +5934,13 @@ class Chewy
     keys << ["^a", "gallery"] unless @generating
     keys << ["^p", "preset"] unless @generating
     keys << ["F1", "help"]
+
+    # Trim to fit narrow screens
+    if narrow?
+      max_keys = @width > 50 ? 4 : 3
+      keys = keys[0, max_keys]
+    end
+
     keys
   end
 
@@ -6184,10 +6286,13 @@ class Chewy
     end
 
     inner_h = @height - 6
-    list_w = [(@width * 0.35).to_i, 30].max
-    preview_w = @width - list_w - 8
+    list_w = narrow? ? @width - 4 : [(@width * 0.35).to_i, 30].max
+    preview_w = narrow? ? 0 : @width - list_w - 8
 
     # -- Left: image list --
+    entry = @gallery_images[@gallery_index]
+    meta = entry[:meta]
+
     visible = inner_h - 2
     half = visible / 2
     scroll_offset = if @gallery_index < half
@@ -6211,6 +6316,20 @@ class Chewy
       end
     end.compact
 
+    # In narrow mode, add metadata below the list
+    if narrow?
+      list_lines << ""
+      list_lines << "#{meta_key.render("File:")} #{meta_val.render(File.basename(entry[:path]))}"
+      if meta["steps"] || meta["seed"]
+        parts = []
+        parts << "steps:#{meta["steps"]}" if meta["steps"]
+        parts << "cfg:#{meta["cfg_scale"]}" if meta["cfg_scale"]
+        parts << "#{meta["width"]}x#{meta["height"]}" if meta["width"]
+        parts << "seed:#{meta["seed"]}" if meta["seed"]
+        list_lines << meta_key.render(parts.join(" | "))
+      end
+    end
+
     counter = dim.render("#{@gallery_index + 1}/#{@gallery_images.length}")
     list_content = list_lines.join("\n") + "\n" + counter
     list_panel = Lipgloss::Style.new
@@ -6218,52 +6337,49 @@ class Chewy
       .width(list_w).height(inner_h).padding(0, 1)
       .render(list_content)
 
-    # -- Right: preview + metadata --
-    entry = @gallery_images[@gallery_index]
-    meta = entry[:meta]
+    if narrow?
+      body = list_panel
+    else
+      # -- Right: preview + metadata --
+      info_lines = []
+      info_lines << "#{meta_key.render("File:")} #{meta_val.render(File.basename(entry[:path]))}"
+      info_lines << "#{meta_key.render("Prompt:")} #{meta_val.render((meta["prompt"] || "-")[0, preview_w - 12])}" if meta["prompt"]
+      if meta["negative_prompt"] && !meta["negative_prompt"].empty?
+        info_lines << "#{meta_key.render("Negative:")} #{meta_val.render(meta["negative_prompt"][0, preview_w - 14])}"
+      end
+      info_lines << "#{meta_key.render("Provider:")} #{meta_val.render(meta["provider_name"] || meta["provider"] || "-")}" if meta["provider"]
+      info_lines << "#{meta_key.render("Model:")} #{meta_val.render(File.basename(meta["model"] || "-"))}" if meta["model"]
+      if meta["steps"] || meta["seed"]
+        parts = []
+        parts << "steps:#{meta["steps"]}" if meta["steps"]
+        parts << "cfg:#{meta["cfg_scale"]}" if meta["cfg_scale"]
+        parts << "#{meta["width"]}x#{meta["height"]}" if meta["width"]
+        parts << "seed:#{meta["seed"]}" if meta["seed"]
+        info_lines << meta_key.render(parts.join(" | "))
+      end
+      if meta["generation_time_seconds"]
+        info_lines << "#{meta_key.render("Time:")} #{meta_val.render("#{meta["generation_time_seconds"]}s")}"
+      end
 
-    info_lines = []
-    info_lines << "#{meta_key.render("File:")} #{meta_val.render(File.basename(entry[:path]))}"
-    info_lines << "#{meta_key.render("Prompt:")} #{meta_val.render((meta["prompt"] || "-")[0, preview_w - 12])}" if meta["prompt"]
-    if meta["negative_prompt"] && !meta["negative_prompt"].empty?
-      info_lines << "#{meta_key.render("Negative:")} #{meta_val.render(meta["negative_prompt"][0, preview_w - 14])}"
-    end
-    info_lines << "#{meta_key.render("Provider:")} #{meta_val.render(meta["provider_name"] || meta["provider"] || "-")}" if meta["provider"]
-    info_lines << "#{meta_key.render("Model:")} #{meta_val.render(File.basename(meta["model"] || "-"))}" if meta["model"]
-    if meta["steps"] || meta["seed"]
-      parts = []
-      parts << "steps:#{meta["steps"]}" if meta["steps"]
-      parts << "cfg:#{meta["cfg_scale"]}" if meta["cfg_scale"]
-      parts << "#{meta["width"]}x#{meta["height"]}" if meta["width"]
-      parts << "seed:#{meta["seed"]}" if meta["seed"]
-      info_lines << meta_key.render(parts.join(" | "))
-    end
-    if meta["generation_time_seconds"]
-      info_lines << "#{meta_key.render("Time:")} #{meta_val.render("#{meta["generation_time_seconds"]}s")}"
-    end
+      info_h = info_lines.length + 1
+      thumb_h = [inner_h - info_h - 2, 6].max
 
-    info_h = info_lines.length + 1
-    thumb_h = [inner_h - info_h - 2, 6].max
+      thumb = gallery_thumb(entry[:path], preview_w - 4, thumb_h)
+      thumb ||= dim.render("(no preview)")
+      preview_content = thumb + "\n" + info_lines.join("\n")
+      preview_panel = Lipgloss::Style.new
+        .border(:rounded).border_foreground(Theme.BORDER_DIM).background(Theme.SURFACE)
+        .width(preview_w).height(inner_h).padding(0, 1)
+        .render(preview_content)
 
-    thumb = gallery_thumb(entry[:path], preview_w - 4, thumb_h)
-    thumb ||= dim.render("(no preview)")
-    preview_content = thumb + "\n" + info_lines.join("\n")
-    preview_panel = Lipgloss::Style.new
-      .border(:rounded).border_foreground(Theme.BORDER_DIM).background(Theme.SURFACE)
-      .width(preview_w).height(inner_h).padding(0, 1)
-      .render(preview_content)
+      body = Lipgloss.join_horizontal(:top, list_panel, preview_panel)
 
-    body = Lipgloss.join_horizontal(:top, list_panel, preview_panel)
-
-    # Register kitty overlay for gallery thumbnail
-    if @kitty_graphics && entry[:path] && File.exist?(entry[:path])
-      # Gallery layout: outer padding(1,2) → outer padding(0,1) → title_bar → body(list_panel | preview_panel)
-      # preview_panel has border(:rounded) = 1 char each side, padding(0,1) = 1 col each side
-      # Rows: 1 outer_pad + 1 title_bar + 1 border_top + 1 = 4
-      # Cols: 2 outer_pad + 1 outer_padding + list_w + 1 border + 1 padding = list_w + 5
-      gallery_img_row = 1 + 1 + 1 + 1
-      gallery_img_col = 2 + 1 + list_w + 1 + 1
-      @kitty_overlay_pending = { path: entry[:path], row: gallery_img_row, col: gallery_img_col, w: preview_w - 4, h: thumb_h, slot: 21 }
+      # Register kitty overlay for gallery thumbnail
+      if @kitty_graphics && entry[:path] && File.exist?(entry[:path])
+        gallery_img_row = 1 + 1 + 1 + 1
+        gallery_img_col = 2 + 1 + list_w + 1 + 1
+        @kitty_overlay_pending = { path: entry[:path], row: gallery_img_row, col: gallery_img_col, w: preview_w - 4, h: thumb_h, slot: 21 }
+      end
     end
 
     title_bar = title_style.render("Gallery") + "  " + dim.render("#{@gallery_images.length} images")
@@ -6527,7 +6643,7 @@ class Chewy
     ]],
     ["Image", [
       ["^b", "Browse for init image (img2img)"],
-      ["^v", "Paste image from clipboard"],
+      ["^v", "Paste (text in prompt, image elsewhere)"],
       ["^u", "Clear init image"],
       ["^e", "Open last image in viewer"],
       ["^f", "Fullscreen image preview"],
@@ -6777,13 +6893,7 @@ class Chewy
       @api_key_input.value = ""
       return close_overlay
     when "ctrl+v"
-      # Read from system clipboard since terminal paste doesn't work reliably
-      clip = `pbpaste 2>/dev/null`.strip rescue ""
-      unless clip.empty?
-        @api_key_input.value = clip
-        return [self, set_status_toast("Pasted from clipboard")]
-      end
-      return [self, nil]
+      return paste_text_into(@api_key_input)
     when "enter"
       api_key = @api_key_input.value.strip
       if api_key.empty?
@@ -6842,6 +6952,8 @@ class Chewy
       @hf_token_pending_action = nil
       @hf_token_input.value = ""
       return close_overlay
+    when "ctrl+v"
+      return paste_text_into(@hf_token_input)
     when "enter"
       token = @hf_token_input.value.strip
       if token.empty?
@@ -7129,4 +7241,4 @@ if (new_version = check_for_updates)
   puts ""
 end
 
-Bubbletea.run(Chewy.new, alt_screen: true, bracketed_paste: true, mouse_cell_motion: true)
+Bubbletea.run(Chewy.new, alt_screen: true, mouse_cell_motion: true)
