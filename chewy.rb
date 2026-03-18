@@ -5317,7 +5317,7 @@ class Chewy
 
     if narrow?
       # In narrow (stacked) mode, unfocused sections collapse to 1 row
-      max_h = [(body_h * 0.55).to_i, 10].max
+      max_h = [(body_h * 0.4).to_i, 8].max
       params_h = @focus == FOCUS_PARAMS ? [@param_display_keys.length + 4, (max_h * 0.6).to_i].max : 3
 
       case @focus
