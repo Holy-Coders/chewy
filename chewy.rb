@@ -4090,30 +4090,33 @@ class Chewy
       .width(tw - 2).height(box_h - 2).render(content)
   end
 
+  CHIP_GAP = 2  # spaces between chips
+
   def toggle_chip_at(input, chips, click_x, click_row, max_w)
-    # Figure out which chip was clicked by replaying the layout
+    # Replay the layout to find which chip was clicked
     current_x = 0; row = 0
     chips.each do |chip|
-      chip_w = chip.length + 2  # " chip " with padding
-      if current_x + chip_w + 1 > max_w && current_x > 0
+      chip_w = chip.length + 2  # " chip " rendered width
+      if current_x + chip_w > max_w && current_x > 0
         row += 1; current_x = 0
       end
-      if row == click_row && click_x >= current_x && click_x < current_x + chip_w + 1
-        # Found the clicked chip — toggle it
+      if row == click_row && click_x >= current_x && click_x < current_x + chip_w
+        # Toggle this chip
         current = input.value
         words = current.downcase.split(/[,\s]+/)
-        if words.include?(chip.downcase.split.first)
-          # Remove it
-          parts = current.split(/,\s*|\s+/).reject { |w| w.downcase == chip.downcase.split.first }
-          input.value = parts.join(", ")
+        chip_key = chip.downcase
+        if words.any? { |w| chip_key.start_with?(w) || w == chip_key.split.first }
+          # Remove — match the full chip text
+          pattern = /,?\s*#{Regexp.escape(chip)}\s*/i
+          result = current.sub(pattern, "").sub(/\A[,\s]+/, "").sub(/[,\s]+\z/, "")
+          input.value = result
         else
-          # Append it
           sep = current.strip.empty? ? "" : ", "
           input.value = "#{current.strip}#{sep}#{chip}"
         end
         return
       end
-      current_x += chip_w + 1
+      current_x += chip_w + CHIP_GAP
     end
   end
 
@@ -4123,20 +4126,23 @@ class Chewy
     words = current_text.downcase.split(/[,\s]+/)
 
     rendered = chips.map do |chip|
-      used = words.include?(chip.downcase.split.first)
+      used = words.any? { |w| chip.downcase.start_with?(w) || w == chip.downcase.split.first }
       style = used ? active : inactive
       style.render(" #{chip} ")
     end
+
+    gap = " " * CHIP_GAP
 
     # Wrap chips to fit within max_w
     lines = [+""]
     rendered.each do |chip|
       visible = chip.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
       line_visible = lines.last.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
-      if line_visible + visible + 1 > max_w && !lines.last.empty?
+      needed = lines.last.empty? ? visible : line_visible + CHIP_GAP + visible
+      if needed > max_w && !lines.last.empty?
         lines << +""
       end
-      lines.last << " " unless lines.last.empty?
+      lines.last << gap unless lines.last.empty?
       lines.last << chip
     end
 
