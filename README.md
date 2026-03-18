@@ -49,12 +49,11 @@ Chewy supports 6 image generation backends. Press `^y` to switch providers.
 |----------|--------|------|
 | **Local (sd.cpp)** | SD 1.x/2.x/3.5, SDXL, FLUX (.gguf/.safetensors/.ckpt) | Local |
 | **OpenAI** | GPT Image 1, DALL-E 3, DALL-E 2 | API |
-| **Fireworks** | FLUX.1 Schnell/Dev/Pro, SDXL, Playground v2.5 | API |
 | **Gemini** | Imagen 3, Imagen 3 Fast, Gemini 2.0 Flash | API |
 | **HuggingFace** | FLUX.1 Schnell/Dev, SDXL, SD 3.5 Large, HiDream | API |
 | **OpenAI-Compatible** | Any model via custom endpoint | API |
 
-API keys are entered in-app (stored securely with chmod 600) or via environment variables (`OPENAI_API_KEY`, `FIREWORKS_API_KEY`, `GEMINI_API_KEY`, `HUGGINGFACE_API_KEY`).
+API keys are entered in-app (stored securely with chmod 600) or via environment variables (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `HUGGINGFACE_API_KEY`).
 
 ### Keyboard shortcuts
 

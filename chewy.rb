@@ -36,25 +36,25 @@ CONFIG_PATH = File.join(CONFIG_DIR, "config.yml")
 PRESETS_PATH = File.join(CONFIG_DIR, "presets.yml")
 
 BUILTIN_PRESETS = {
-  # --- txt2img ---
-  "Quick Draft" => { "steps" => 10, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "ays" },
-  "Balanced" => { "steps" => 20, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler_a", "scheduler" => "karras" },
-  "High Quality" => { "steps" => 30, "cfg_scale" => 7.0, "width" => 768, "height" => 768, "sampler" => "dpm++2m", "scheduler" => "karras" },
-  "Max Quality" => { "steps" => 50, "cfg_scale" => 7.5, "width" => 1024, "height" => 1024, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  # --- txt2img (SD) ---
+  "Quick Draft" => { "steps" => 10, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "ays", "model_type" => "sd" },
+  "Balanced" => { "steps" => 20, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd" },
+  "High Quality" => { "steps" => 30, "cfg_scale" => 7.0, "width" => 768, "height" => 768, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sd" },
+  "Max Quality" => { "steps" => 50, "cfg_scale" => 7.5, "width" => 1024, "height" => 1024, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sdxl" },
   # --- Aspect ratios ---
-  "Portrait" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 512, "height" => 768, "sampler" => "euler_a", "scheduler" => "karras" },
-  "Landscape" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 768, "height" => 512, "sampler" => "euler_a", "scheduler" => "karras" },
+  "Portrait" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 512, "height" => 768, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd" },
+  "Landscape" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 768, "height" => 512, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd" },
   "Widescreen (16:9)" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 896, "height" => 512, "sampler" => "dpm++2m", "scheduler" => "karras" },
-  "Square HD" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 1024, "height" => 1024, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  "Square HD" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 1024, "height" => 1024, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sdxl" },
   # --- img2img ---
   "Image Edit - Quick" => { "steps" => 20, "cfg_scale" => 7.0, "strength" => 0.5, "sampler" => "euler_a", "scheduler" => "karras" },
   "Image Edit - High Quality" => { "steps" => 35, "cfg_scale" => 7.0, "strength" => 0.65, "sampler" => "dpm++2m", "scheduler" => "karras" },
   "Image Edit - Creative" => { "steps" => 30, "cfg_scale" => 8.0, "strength" => 0.85, "sampler" => "euler_a", "scheduler" => "karras" },
   "Image Edit - Subtle" => { "steps" => 25, "cfg_scale" => 7.0, "strength" => 0.3, "sampler" => "dpm++2m", "scheduler" => "karras" },
   # --- FLUX ---
-  "FLUX - Quick" => { "steps" => 4, "cfg_scale" => 1.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "simple" },
-  "FLUX - Balanced" => { "steps" => 8, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple" },
-  "FLUX - High Quality" => { "steps" => 20, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple" },
+  "FLUX - Quick" => { "steps" => 4, "cfg_scale" => 1.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
+  "FLUX - Balanced" => { "steps" => 8, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
+  "FLUX - High Quality" => { "steps" => 20, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
   # --- Styles ---
   "Photorealistic" => { "steps" => 35, "cfg_scale" => 5.0, "width" => 768, "height" => 768, "sampler" => "dpm++2m", "scheduler" => "karras" },
   "Artistic / Painterly" => { "steps" => 30, "cfg_scale" => 10.0, "width" => 768, "height" => 768, "sampler" => "euler_a", "scheduler" => "karras" },
@@ -787,98 +787,6 @@ class OpenAIImagesProvider < Provider::Base
   end
 end
 
-# ---------- Fireworks Provider ----------
-
-class FireworksProvider < Provider::Base
-  MODELS = [
-    { id: "accounts/fireworks/models/flux-1-schnell-fp8", name: "FLUX.1 Schnell", desc: "Fast, 1-4 steps", type: :flux },
-    { id: "accounts/fireworks/models/flux-1-dev-fp8", name: "FLUX.1 Dev", desc: "Quality, 20-30 steps", type: :flux },
-    { id: "accounts/fireworks/models/flux-1.1-pro", name: "FLUX 1.1 Pro", desc: "Highest quality", type: :flux },
-    { id: "accounts/fireworks/models/stable-diffusion-xl-1024-v1-0", name: "SDXL 1.0", desc: "Stable Diffusion XL", type: :sdxl },
-    { id: "accounts/fireworks/models/playground-v2-5-1024px-aesthetic", name: "Playground v2.5", desc: "Aesthetic, 1024px", type: :sdxl },
-  ].freeze
-
-  def id; "fireworks"; end
-  def display_name; "Fireworks"; end
-  def provider_type; :api; end
-
-  def capabilities
-    Provider::Capabilities.new(
-      negative_prompt: false, seed: false, batch: true, img2img: false,
-      live_preview: false, cancel: false, model_listing: true, lora: false,
-      cfg_scale: false, sampler: false, scheduler: false, threads: false,
-      strength: false, width_height: true
-    )
-  end
-
-  def needs_api_key?; true; end
-  def api_key_env_var; "FIREWORKS_API_KEY"; end
-  def api_key_setup_url; "fireworks.ai/api-keys"; end
-  def api_key_set?; !!resolve_api_key; end
-
-  def list_models; MODELS; end
-
-  def generate(request, cancelled: -> { false }, &on_event)
-    api_key = resolve_api_key
-    return Provider::GenerationResult.new(error: "FIREWORKS_API_KEY not set") unless api_key
-
-    model_id = request.model || MODELS.first[:id]
-    model_info = MODELS.find { |m| m[:id] == model_id }
-    is_flux = model_info&.dig(:type) == :flux
-
-    on_event&.call(:status, "Sending request to Fireworks...")
-
-    w = (request.width / 8.0).round * 8
-    h = (request.height / 8.0).round * 8
-
-    body = { prompt: request.prompt, width: w, height: h }
-    if is_flux
-      body[:cfg_scale] = 0
-      body[:steps] = [request.steps || 4, 1].max
-    else
-      body[:cfg_scale] = request.cfg_scale || 7.0
-      body[:steps] = [request.steps || 20, 1].max
-      neg = request.negative_prompt.to_s.strip
-      body[:negative_prompt] = neg unless neg.empty?
-    end
-
-    uri = URI.parse("https://api.fireworks.ai/inference/v1/image_generation/#{model_id}")
-    http = Net::HTTP.new(uri.host, uri.port)
-    http.use_ssl = true
-    http.open_timeout = 30
-    http.read_timeout = 300
-
-    req = Net::HTTP::Post.new(uri)
-    req["Authorization"] = "Bearer #{api_key}"
-    req["Content-Type"] = "application/json"
-    req["Accept"] = "image/png"
-    req.body = JSON.generate(body)
-
-    model_name = model_info&.dig(:name) || model_id.split("/").last
-    on_event&.call(:status, "Generating with #{model_name}...")
-
-    start_time = Time.now
-    resp = http.request(req)
-    elapsed = (Time.now - start_time).round(1)
-
-    unless resp.is_a?(Net::HTTPSuccess)
-      error_body = JSON.parse(resp.body) rescue {}
-      error_msg = error_body.dig("error", "message") || error_body["message"] || resp.body[0, 200]
-      return Provider::GenerationResult.new(error: "Fireworks: #{error_msg}")
-    end
-
-    on_event&.call(:status, "Saving image...")
-    FileUtils.mkdir_p(request.output_dir)
-
-    timestamp = Time.now.strftime("%Y%m%d_%H%M%S_%L")
-    output_path = File.join(request.output_dir, "#{timestamp}_0.png")
-    File.binwrite(output_path, resp.body)
-
-    Provider::GenerationResult.new(paths: [output_path], seeds: [nil], elapsed: elapsed)
-  rescue => e
-    Provider::GenerationResult.new(error: "Fireworks: #{e.message}")
-  end
-end
 
 # ---------- HuggingFace Inference Provider ----------
 
@@ -1665,7 +1573,6 @@ class Chewy
     providers = [
       LocalSdCppProvider.new(sd_bin: @sd_bin, models_dir: @models_dir, lora_dir: @lora_dir),
       OpenAIImagesProvider.new,
-      FireworksProvider.new,
       GeminiProvider.new,
       HuggingFaceInferenceProvider.new,
       A1111Provider.new(@config["a1111"] || {}),
@@ -3562,15 +3469,48 @@ class Chewy
       @scheduler_index = SCHEDULER_OPTIONS.index(@scheduler) || 0
     end
     @params[:strength] = d["strength"].to_f if d["strength"]
+
+    # Model selection: exact path (user presets) or type match (builtins)
+    if d["model"] && File.exist?(d["model"])
+      @selected_model_path = d["model"]
+      @preview_cache = nil
+    elsif d["model_type"] && @provider.provider_type == :local
+      select_model_by_type(d["model_type"])
+    end
+  end
+
+  def select_model_by_type(type)
+    return unless File.directory?(@models_dir)
+    pattern = case type
+    when "flux" then /flux/i
+    when "sdxl" then /sdxl|sd_xl/i
+    when "sd3" then /sd3/i
+    when "sd" then /sd[_\-]?1|v1[_\-]|stable.diffusion.*1/i
+    end
+    return unless pattern
+
+    # Prefer pinned models, then recent, then any match
+    candidates = Dir.glob(File.join(@models_dir, "**", "*.{gguf,safetensors,ckpt}"))
+    match = (@pinned_models || []).find { |p| File.basename(p) =~ pattern && File.exist?(p) }
+    match ||= (@recent_models || []).find { |p| File.basename(p) =~ pattern && File.exist?(p) }
+    match ||= candidates.find { |p| File.basename(p) =~ pattern }
+
+    if match
+      @selected_model_path = match
+      @preview_cache = nil
+    end
   end
 
   def save_user_preset(name)
-    @user_presets[name] = {
+    data = {
       "steps" => @params[:steps], "cfg_scale" => @params[:cfg_scale],
       "width" => @params[:width], "height" => @params[:height],
       "seed" => @params[:seed], "sampler" => @sampler, "scheduler" => @scheduler,
       "batch" => @params[:batch],
     }
+    data["model"] = @selected_model_path if @selected_model_path
+    data["strength"] = @params[:strength] if @init_image_path
+    @user_presets[name] = data
     save_presets
   end
 
@@ -5397,6 +5337,11 @@ class Chewy
         Lipgloss::Style.new.foreground(Theme.SUCCESS).render(" custom")
 
       desc_parts = []
+      if d['model']
+        desc_parts << File.basename(d['model'], File.extname(d['model']))
+      elsif d['model_type']
+        desc_parts << d['model_type'].upcase
+      end
       desc_parts << "#{d['steps']} steps" if d['steps']
       desc_parts << d['sampler'] if d['sampler']
       desc_parts << "#{d['width']}x#{d['height']}" if d['width'] && d['height']
