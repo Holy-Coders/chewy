@@ -1594,6 +1594,9 @@ class Chewy
     when Bubbletea::KeyMessage
       return dismiss_splash if @splash
       handle_key(message)
+    when Bubbletea::MouseMessage
+      return dismiss_splash if @splash
+      handle_mouse(message)
     else
       forward_to_focused(message)
     end
@@ -1941,6 +1944,116 @@ class Chewy
     unless @focus == FOCUS_PARAMS
       @editing_param = false; @param_edit_buffer = ""
     end
+  end
+
+  # ========== Mouse Handling ==========
+
+  def handle_mouse(message)
+    return [self, nil] unless message.press?
+    return handle_overlay_mouse(message) if @overlay
+
+    x = message.x
+    y = message.y
+
+    # Account for padding: 2 chars left, 1 line top
+    cx = x - 2
+    cy = y - 1
+
+    lw = left_panel_width
+    prompt_h, negative_h, params_h = left_panel_heights
+
+    # Header row (row 0 of content)
+    if cy == 0
+      # Click on header — open provider overlay if clicking right side
+      header_mid = lw
+      if cx >= header_mid
+        return toggle_overlay(:provider)
+      else
+        return toggle_overlay(:models)
+      end
+    end
+
+    # Bottom bar (last content row)
+    if cy >= @height - 3
+      return [self, nil] # bottom bar clicks could be added later
+    end
+
+    # Body area
+    body_y = cy - 1  # offset for header
+
+    if cx < lw
+      # Left panel clicks
+      if body_y < prompt_h
+        # Prompt section
+        unless @focus == FOCUS_PROMPT
+          @focus = FOCUS_PROMPT
+          @prompt_input.focus
+          @negative_input.blur
+        end
+      elsif body_y < prompt_h + negative_h
+        # Negative prompt section
+        unless @focus == FOCUS_NEGATIVE
+          @focus = FOCUS_NEGATIVE
+          @negative_input.focus
+          @prompt_input.blur
+        end
+      else
+        # Params section
+        unless @focus == FOCUS_PARAMS
+          @focus = FOCUS_PARAMS
+          @prompt_input.blur
+          @negative_input.blur
+        end
+        # Click on specific param row when expanded
+        if @focus == FOCUS_PARAMS
+          param_row = body_y - prompt_h - negative_h - 3  # account for border + label + separator
+          if param_row >= 0 && param_row < @param_display_keys.length
+            @param_index = param_row
+          end
+        end
+      end
+    else
+      # Right panel clicks — preview area
+      if @last_output_path && !@generating
+        show_fullscreen_image(@last_output_path)
+      end
+    end
+
+    [self, nil]
+  end
+
+  def handle_overlay_mouse(message)
+    return [self, nil] unless message.press?
+
+    case @overlay
+    when :models
+      # Click on model list item
+      cy = message.y - 4  # account for padding + title + separator
+      if cy >= 0 && @model_list
+        @model_list, _ = @model_list.update(message)
+      end
+    when :provider
+      # Click on provider item
+      cy = message.y - 4
+      idx = cy / 3  # each provider takes ~3 lines (name + model + gap)
+      if idx >= 0 && idx < @providers.length
+        @provider_index = idx
+      end
+    when :theme
+      cy = message.y - 4
+      idx = cy / 3  # each theme takes ~3 lines (name + swatch + gap)
+      if idx >= 0 && idx < THEME_NAMES.length
+        @theme_index = idx
+        Theme.set(THEME_NAMES[@theme_index])
+      end
+    when :fullscreen_image
+      return close_overlay
+    when :gallery
+      # Click anywhere in gallery
+      nil
+    end
+
+    [self, nil]
   end
 
   # ========== Key Handling ==========
@@ -4896,4 +5009,4 @@ if (new_version = check_for_updates)
   puts ""
 end
 
-Bubbletea.run(Chewy.new, alt_screen: true, bracketed_paste: true)
+Bubbletea.run(Chewy.new, alt_screen: true, bracketed_paste: true, mouse_cell_motion: true)
