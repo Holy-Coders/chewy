@@ -1990,12 +1990,23 @@ class Chewy
           @prompt_input.focus
           @negative_input.blur
         end
+        # Check if clicking a chip (bottom rows of prompt section)
+        chip_row = body_y - 2  # offset for border + label
+        if @focus == FOCUS_PROMPT && chip_row >= prompt_h - 4
+          toggle_chip_at(@prompt_input, PROMPT_CHIPS, cx - 3, chip_row - (prompt_h - 4), left_panel_width - 6)
+        end
       elsif body_y < prompt_h + negative_h
         # Negative prompt section
         unless @focus == FOCUS_NEGATIVE
           @focus = FOCUS_NEGATIVE
           @negative_input.focus
           @prompt_input.blur
+        end
+        # Check if clicking a chip
+        local_y = body_y - prompt_h
+        chip_row = local_y - 2
+        if @focus == FOCUS_NEGATIVE && chip_row >= negative_h - 4
+          toggle_chip_at(@negative_input, NEGATIVE_CHIPS, cx - 3, chip_row - (negative_h - 4), left_panel_width - 6)
         end
       else
         # Params section
@@ -4011,6 +4022,19 @@ class Chewy
     style ? style.render(text) : text
   end
 
+  PROMPT_CHIPS = [
+    "photorealistic", "cinematic lighting", "8k uhd", "detailed",
+    "oil painting", "watercolor", "anime style", "pixel art",
+    "studio portrait", "landscape", "macro photography", "fantasy art",
+    "minimalist", "surreal", "concept art", "isometric",
+  ].freeze
+
+  NEGATIVE_CHIPS = [
+    "blurry", "low quality", "deformed", "ugly",
+    "bad anatomy", "watermark", "text", "signature",
+    "cropped", "out of frame", "duplicate", "noise",
+  ].freeze
+
   def render_prompt_section(tw, box_h)
     focused = @focus == FOCUS_PROMPT
 
@@ -4026,9 +4050,17 @@ class Chewy
       ""
     end
 
-    prompt_lines = [box_h - 4 - lora_tags.count("\n"), 1].max
+    chips_line = if focused
+      render_chips(PROMPT_CHIPS, tw - 6, @prompt_input.value)
+    else
+      ""
+    end
+    extra_lines = lora_tags.count("\n") + (chips_line.empty? ? 0 : chips_line.count("\n") + 1)
+
+    prompt_lines = [box_h - 4 - extra_lines, 1].max
     prompt_view = render_wrapped_input(@prompt_input, max_lines: prompt_lines)
     content = "#{label}\n#{prompt_view}#{lora_tags}"
+    content += "\n#{chips_line}" unless chips_line.empty?
 
     border_color = focused ? gradient_border_color : Theme.BORDER_DIM
     Lipgloss::Style.new.border(:rounded).border_foreground(border_color).background(Theme.SURFACE)
@@ -4041,13 +4073,74 @@ class Chewy
     label_style = Lipgloss::Style.new.foreground(focused ? Theme.ACCENT : Theme.TEXT_DIM).bold(focused)
     label = label_style.render("Negative Prompt")
 
-    negative_lines = [box_h - 3, 1].max
+    chips_line = if focused
+      render_chips(NEGATIVE_CHIPS, tw - 6, @negative_input.value)
+    else
+      ""
+    end
+    extra_lines = chips_line.empty? ? 0 : chips_line.count("\n") + 1
+
+    negative_lines = [box_h - 3 - extra_lines, 1].max
     negative_view = render_wrapped_input(@negative_input, max_lines: negative_lines)
     content = "#{label}\n#{negative_view}"
+    content += "\n#{chips_line}" unless chips_line.empty?
 
     border_color = focused ? gradient_border_color : Theme.BORDER_DIM
     Lipgloss::Style.new.border(:rounded).border_foreground(border_color).background(Theme.SURFACE)
       .width(tw - 2).height(box_h - 2).render(content)
+  end
+
+  def toggle_chip_at(input, chips, click_x, click_row, max_w)
+    # Figure out which chip was clicked by replaying the layout
+    current_x = 0; row = 0
+    chips.each do |chip|
+      chip_w = chip.length + 2  # " chip " with padding
+      if current_x + chip_w + 1 > max_w && current_x > 0
+        row += 1; current_x = 0
+      end
+      if row == click_row && click_x >= current_x && click_x < current_x + chip_w + 1
+        # Found the clicked chip — toggle it
+        current = input.value
+        words = current.downcase.split(/[,\s]+/)
+        if words.include?(chip.downcase.split.first)
+          # Remove it
+          parts = current.split(/,\s*|\s+/).reject { |w| w.downcase == chip.downcase.split.first }
+          input.value = parts.join(", ")
+        else
+          # Append it
+          sep = current.strip.empty? ? "" : ", "
+          input.value = "#{current.strip}#{sep}#{chip}"
+        end
+        return
+      end
+      current_x += chip_w + 1
+    end
+  end
+
+  def render_chips(chips, max_w, current_text)
+    active = Lipgloss::Style.new.background(Theme.PRIMARY).foreground(Theme.SURFACE).bold(true)
+    inactive = Lipgloss::Style.new.background(Theme.BORDER_DIM).foreground(Theme.TEXT_DIM)
+    words = current_text.downcase.split(/[,\s]+/)
+
+    rendered = chips.map do |chip|
+      used = words.include?(chip.downcase.split.first)
+      style = used ? active : inactive
+      style.render(" #{chip} ")
+    end
+
+    # Wrap chips to fit within max_w
+    lines = [+""]
+    rendered.each do |chip|
+      visible = chip.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
+      line_visible = lines.last.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
+      if line_visible + visible + 1 > max_w && !lines.last.empty?
+        lines << +""
+      end
+      lines.last << " " unless lines.last.empty?
+      lines.last << chip
+    end
+
+    lines.join("\n")
   end
 
   def render_params_section(tw, box_h)
