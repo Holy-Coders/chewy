@@ -63,6 +63,49 @@ BUILTIN_PRESETS = {
   "Pixel Art" => { "steps" => 20, "cfg_scale" => 8.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "discrete" },
 }.freeze
 
+# ---------- Model Families ----------
+
+# Each model family groups related architectures and defines compatibility boundaries.
+# LoRAs are only compatible within the same family (or explicitly listed compatible_models).
+MODEL_FAMILIES = {
+  "SD 1.x" => {
+    label: "Stable Diffusion 1.x",
+    aliases: ["SD 1.5", "SD 1.4", "SD1", "sd15"],
+    description: "Classic SD — fast, low VRAM, huge LoRA ecosystem",
+    default_resolution: [512, 512],
+  },
+  "SD 2.x" => {
+    label: "Stable Diffusion 2.x",
+    aliases: ["SD 2.0", "SD 2.1", "sd2"],
+    description: "SD v2 — 768px native, fewer LoRAs available",
+    default_resolution: [768, 768],
+  },
+  "SDXL" => {
+    label: "Stable Diffusion XL",
+    aliases: ["SDXL 1.0", "SDXL Turbo", "sdxl"],
+    description: "SDXL — high quality 1024px, growing LoRA support",
+    default_resolution: [1024, 1024],
+  },
+  "SD3" => {
+    label: "Stable Diffusion 3",
+    aliases: ["SD 3.5", "sd3"],
+    description: "Newest SD architecture — excellent quality",
+    default_resolution: [1024, 1024],
+  },
+  "FLUX" => {
+    label: "FLUX",
+    aliases: ["FLUX.1", "flux-schnell", "flux-dev"],
+    description: "State-of-the-art — needs companion files",
+    default_resolution: [1024, 1024],
+  },
+}.freeze
+
+# Canonical family names for quick lookup from aliases
+MODEL_FAMILY_LOOKUP = MODEL_FAMILIES.each_with_object({}) do |(family, info), h|
+  h[family.downcase] = family
+  info[:aliases].each { |a| h[a.downcase] = family }
+end.freeze
+
 # Best settings per model type — applied when user confirms after selecting a model
 MODEL_BEST_SETTINGS = {
   "FLUX"   => { "steps" => 8, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple" },
@@ -105,6 +148,7 @@ PRELOADED_MODELS = [
     file: "stable-diffusion-v1-5-pruned-emaonly-Q8_0.gguf",
     size: 1_640_000_000,
     type: "SD 1.5",
+    model_family: "SD 1.x",
     desc: "Classic SD 1.5 — fast, low VRAM, great for learning",
   },
   {
@@ -113,6 +157,7 @@ PRELOADED_MODELS = [
     file: "sd3.5_medium-Q5_0.gguf",
     size: 2_200_000_000,
     type: "SD 3.5",
+    model_family: "SD3",
     desc: "Newest SD architecture — excellent quality/speed balance",
   },
   {
@@ -121,6 +166,7 @@ PRELOADED_MODELS = [
     file: "stable-diffusion-xl-1.0-turbo-Q4_0.gguf",
     size: 3_670_000_000,
     type: "SDXL",
+    model_family: "SDXL",
     desc: "Fast SDXL variant — 1-4 steps, real-time generation",
   },
   {
@@ -129,6 +175,7 @@ PRELOADED_MODELS = [
     file: "LCM_Dreamshaper_v7-f16.gguf",
     size: 1_990_000_000,
     type: "SD 1.5",
+    model_family: "SD 1.x",
     desc: "DreamShaper with LCM — 4-8 steps, artistic style",
   },
   {
@@ -137,53 +184,94 @@ PRELOADED_MODELS = [
     file: "flux1-schnell-Q4_0.gguf",
     size: 6_876_948_608,
     type: "FLUX",
+    model_family: "FLUX",
     desc: "State-of-the-art FLUX — needs companion files (auto-downloaded)",
   },
 ].freeze
 
 # Curated list of recommended LoRAs for new users
+# Each LoRA includes rich metadata for compatibility filtering and TUI cards
 RECOMMENDED_LORAS = [
   {
-    name: "Detail Tweaker (SD 1.5)",
+    name: "Detail Tweaker",
     repo: "jbilcke-hf/sd-lora-detail-tweaker",
     file: "detail_tweaker.safetensors",
     size: 36_000_000,
-    compat: "SD 1.5",
+    model_family: "SD 1.x",
+    lora_type: :style,
     desc: "Enhance or reduce fine details — works with any SD 1.5 model",
+    use_for: "Adding crisp detail or softening textures",
+    avoid: "Already highly detailed prompts at high weight",
+    recommended_weight: { min: 0.4, max: 1.0, default: 0.7 },
+    tags: %w[detail enhance texture sharpness],
+    example_prompt: "a detailed portrait, intricate clothing <lora:detail_tweaker:0.7>",
   },
   {
     name: "LCM LoRA (SD 1.5)",
     repo: "latent-consistency/lcm-lora-sdv1-5",
     file: "pytorch_lora_weights.safetensors",
     size: 67_000_000,
-    compat: "SD 1.5",
+    model_family: "SD 1.x",
+    lora_type: :task,
     desc: "Latent Consistency — generate in 4-8 steps instead of 20+",
+    use_for: "Speed — dramatically fewer steps needed",
+    avoid: "High step counts (defeats the purpose)",
+    recommended_weight: { min: 0.8, max: 1.0, default: 1.0 },
+    tags: %w[speed lcm fast consistency],
+    example_prompt: "a cat sitting on a windowsill, 4 steps",
   },
   {
     name: "LCM LoRA (SDXL)",
     repo: "latent-consistency/lcm-lora-sdxl",
     file: "pytorch_lora_weights.safetensors",
     size: 394_000_000,
-    compat: "SDXL",
+    model_family: "SDXL",
+    lora_type: :task,
     desc: "Latent Consistency for SDXL — fast generation, fewer steps",
+    use_for: "Speed — 4-8 steps for SDXL quality",
+    avoid: "High step counts",
+    recommended_weight: { min: 0.8, max: 1.0, default: 1.0 },
+    tags: %w[speed lcm fast sdxl],
+    example_prompt: "a landscape at sunset, golden hour, 4 steps",
   },
   {
-    name: "Pixel Art (SD 1.5)",
+    name: "Pixel Art (SDXL)",
     repo: "nerijs/pixel-art-xl",
     file: "pixel-art-xl.safetensors",
     size: 44_000_000,
-    compat: "SDXL",
+    model_family: "SDXL",
+    lora_type: :style,
     desc: "Generate pixel art style images",
+    use_for: "Retro / pixel art aesthetic",
+    avoid: "Photorealistic prompts",
+    recommended_weight: { min: 0.6, max: 1.0, default: 0.8 },
+    tags: %w[pixel retro game art style],
+    example_prompt: "a fantasy castle, pixel art style <lora:pixel-art-xl:0.8>",
   },
   {
     name: "Papercut (SD 1.5)",
     repo: "Norod78/sd15-papercut-lora",
     file: "papercut.safetensors",
     size: 36_000_000,
-    compat: "SD 1.5",
+    model_family: "SD 1.x",
+    lora_type: :style,
     desc: "Paper cutout art style — use 'papercut' in prompt",
+    use_for: "Whimsical paper craft aesthetic",
+    avoid: "Realistic or photographic prompts",
+    recommended_weight: { min: 0.5, max: 0.9, default: 0.7 },
+    tags: %w[papercut craft style artistic whimsical],
+    example_prompt: "papercut a cute fox in a forest",
   },
 ].freeze
+
+# LoRA type labels for display
+LORA_TYPE_LABELS = {
+  style: "Style",
+  character: "Character",
+  task: "Task",
+  concept: "Concept",
+  pose: "Pose",
+}.freeze
 
 # ---------- Themes ----------
 
@@ -1571,11 +1659,14 @@ class Chewy
     @download_search_focused = false
 
     # LoRA
-    @available_loras = []
+    @all_loras = []         # all scanned LoRAs (unfiltered)
+    @available_loras = []   # LoRAs compatible with current model family
+    @incompatible_loras = [] # LoRAs from other families (shown dimmed)
     @selected_loras = [] # [{name:, path:, weight:}]
     @lora_index = 0
     @editing_lora_weight = false
     @lora_weight_buffer = ""
+    @lora_card_expanded = false # toggle detail card view
 
     # LoRA download
     @lora_download_view = :recommended
@@ -1843,7 +1934,10 @@ class Chewy
         title = @provider.provider_type == :api ? "#{@provider.display_name} Models" : "Models"
         render_overlay_panel(title, render_models_content, render_models_status)
       when :download then render_download_view
-      when :lora     then render_overlay_panel("LoRA Selection", render_lora_content, render_lora_status)
+      when :lora
+        family = current_model_family
+        lora_title = family ? "LoRA Selection [#{family}]" : "LoRA Selection"
+        render_overlay_panel(lora_title, render_lora_content, render_lora_status)
       when :lora_download then render_lora_download_view
       when :help then render_help_view
       when :preset   then render_overlay_panel("Presets", render_preset_content, render_preset_status)
@@ -1939,7 +2033,9 @@ class Chewy
         prefix = @pinned_models.include?(f) ? "* " : "  "
         source = model_source_tag(f)
         type_tag = model_type_tag(f)
-        { title: "#{prefix}#{name}", description: "#{type_tag}#{source}".strip }
+        family = model_family_for(detect_model_type(f))
+        family_tag = family ? " [#{family}]" : ""
+        { title: "#{prefix}#{name}", description: "#{type_tag}#{family_tag}#{source}".strip }
       end
     end
 
@@ -2064,6 +2160,7 @@ class Chewy
       @model_types[message.path] = message.model_type
       save_config
       scan_models  # refresh list to show detected type
+      filter_loras # re-filter LoRAs now that we know the model type
     end
     [self, nil]
   end
@@ -2071,9 +2168,29 @@ class Chewy
   def scan_loras
     return unless File.directory?(@lora_dir)
     pattern = File.join(@lora_dir, "**", "*.safetensors")
-    @available_loras = Dir.glob(pattern).map do |f|
-      { name: File.basename(f, ".safetensors"), path: f }
+    all_loras = Dir.glob(pattern).map do |f|
+      name = File.basename(f, ".safetensors")
+      family = detect_lora_family(name, f)
+      { name: name, path: f, family: family }
     end
+    @all_loras = all_loras
+    filter_loras
+  end
+
+  # Filter available LoRAs by current model family.
+  # Incompatible LoRAs are shown separately so user knows they exist but can't select them.
+  def filter_loras
+    family = current_model_family
+    if family
+      @available_loras = (@all_loras || []).select { |l| l[:family].nil? || l[:family] == family }
+      @incompatible_loras = (@all_loras || []).select { |l| l[:family] && l[:family] != family }
+    else
+      @available_loras = @all_loras || []
+      @incompatible_loras = []
+    end
+    # Remove any selected LoRAs that are no longer compatible
+    @selected_loras.reject! { |sl| !@available_loras.any? { |al| al[:path] == sl[:path] } } if @selected_loras
+    @lora_index = [[@lora_index, @available_loras.length - 1].min, 0].max
   end
 
   # ========== Progressive Reveal ==========
@@ -2614,7 +2731,20 @@ class Chewy
     end
   end
 
-  def detect_lora_type(name, path)
+  # Resolve a model type string to its canonical MODEL_FAMILIES key
+  def model_family_for(model_type)
+    return nil unless model_type
+    MODEL_FAMILY_LOOKUP[model_type.downcase] || model_type
+  end
+
+  # Get the model family for the currently selected model
+  def current_model_family
+    return nil unless @selected_model_path
+    model_type = detect_model_type(@selected_model_path)
+    model_family_for(model_type)
+  end
+
+  def detect_lora_family(name, path)
     n = (name || File.basename(path, ".safetensors")).downcase
     dir = File.dirname(path).downcase
     combined = "#{dir}/#{n}"
@@ -2626,19 +2756,54 @@ class Chewy
       "SD 1.x"
     elsif combined.include?("sd2") || combined.include?("v2-")
       "SD 2.x"
+    elsif combined.include?("sd3")
+      "SD3"
     end
   end
 
+  # Keep old name as alias for backward compat in generation validation
+  alias detect_lora_type detect_lora_family
+
   def lora_compatible?(name, path, model_type)
-    lora_type = detect_lora_type(name, path)
-    return true unless lora_type # unknown LoRA type — allow it
-    case model_type
-    when "FLUX" then lora_type == "FLUX"
-    when "SDXL" then lora_type == "SDXL"
-    when "SD 1.x" then lora_type == "SD 1.x"
-    when "SD 2.x" then lora_type == "SD 2.x"
-    when "SD3" then lora_type == "SD3"
-    else true
+    lora_family = detect_lora_family(name, path)
+    return true unless lora_family # unknown LoRA family — allow it
+    model_fam = model_family_for(model_type)
+    return true unless model_fam
+    lora_family == model_fam
+  end
+
+  # Get metadata for a recommended LoRA by filename
+  def recommended_lora_metadata(filename)
+    RECOMMENDED_LORAS.find { |l| l[:file] == filename }
+  end
+
+  # Get metadata for a local LoRA (check recommended list first, then infer)
+  def lora_metadata(lora)
+    basename = File.basename(lora[:path])
+    rec = RECOMMENDED_LORAS.find { |l| l[:file] == basename }
+    if rec
+      {
+        model_family: rec[:model_family],
+        lora_type: rec[:lora_type],
+        desc: rec[:desc],
+        use_for: rec[:use_for],
+        avoid: rec[:avoid],
+        recommended_weight: rec[:recommended_weight],
+        tags: rec[:tags],
+        example_prompt: rec[:example_prompt],
+      }
+    else
+      family = detect_lora_family(lora[:name], lora[:path])
+      {
+        model_family: family,
+        lora_type: nil,
+        desc: nil,
+        use_for: nil,
+        avoid: nil,
+        recommended_weight: nil,
+        tags: nil,
+        example_prompt: nil,
+      }
     end
   end
 
@@ -3296,6 +3461,7 @@ class Chewy
       if @model_paths&.any? && idx < @model_paths.length
         @selected_model_path = @model_paths[idx]
         @preview_cache = nil # invalidate preview when model changes
+        filter_loras # re-filter LoRAs for new model family
         save_config
         # Validate model in background if we don't know its type yet
         validate_cmd = nil
@@ -3710,10 +3876,14 @@ class Chewy
     case key
     when "up", "k"
       @lora_index = (@lora_index - 1) % [@available_loras.length, 1].max
+      @lora_card_expanded = false
     when "down", "j"
       @lora_index = (@lora_index + 1) % [@available_loras.length, 1].max
+      @lora_card_expanded = false
     when "enter", " "
       toggle_lora_selection(@lora_index)
+    when "i"
+      @lora_card_expanded = !@lora_card_expanded
     when "w"
       lora = @available_loras[@lora_index]
       if lora && @selected_loras.any? { |l| l[:path] == lora[:path] }
@@ -3737,7 +3907,9 @@ class Chewy
     if existing
       @selected_loras.delete_at(existing)
     else
-      @selected_loras << { name: lora[:name], path: lora[:path], weight: 1.0 }
+      meta = lora_metadata(lora)
+      default_weight = meta.dig(:recommended_weight, :default) || 1.0
+      @selected_loras << { name: lora[:name], path: lora[:path], weight: default_weight }
     end
   end
 
@@ -3761,11 +3933,26 @@ class Chewy
   end
 
   def build_lora_recommended_list
-    items = RECOMMENDED_LORAS.map do |l|
+    family = current_model_family
+    # Filter recommended LoRAs by current model family (show all if no model selected)
+    filtered = if family
+      RECOMMENDED_LORAS.select { |l| l[:model_family] == family }
+    else
+      RECOMMENDED_LORAS
+    end
+    @lora_recommended_filtered = filtered
+
+    items = filtered.map do |l|
       already = File.exist?(File.join(@lora_dir, l[:file]))
       status = already ? " (installed)" : ""
-      { title: "#{l[:name]}#{status}", description: "#{l[:compat]} | #{format_bytes(l[:size])} — #{l[:desc]}" }
+      type_label = l[:lora_type] ? " #{LORA_TYPE_LABELS[l[:lora_type]] || l[:lora_type]}" : ""
+      { title: "#{l[:name]}#{status}", description: "#{l[:model_family]}#{type_label} | #{format_bytes(l[:size])} \u2014 #{l[:desc]}" }
     end
+
+    if family && filtered.empty?
+      items << { title: "No recommended LoRAs for #{family}", description: "Browse online to find compatible LoRAs" }
+    end
+
     items << { title: "Browse HuggingFace...", description: "Search HuggingFace for LoRAs" }
     items << { title: "Browse CivitAI...", description: "Search CivitAI for community LoRAs" }
     @lora_recommended_list = Bubbles::List.new(items, width: @width - 12, height: [@height - 10, 6].max)
@@ -3980,14 +4167,18 @@ class Chewy
     return [self, nil] unless @lora_recommended_list
     if message.to_s == "enter"
       idx = @lora_recommended_list.selected_index rescue 0
-      if idx < RECOMMENDED_LORAS.length
-        l = RECOMMENDED_LORAS[idx]
+      filtered = @lora_recommended_filtered || []
+      # Account for "No recommended LoRAs" placeholder item
+      has_placeholder = filtered.empty? && current_model_family
+      rec_count = filtered.length + (has_placeholder ? 1 : 0)
+      if idx < filtered.length
+        l = filtered[idx]
         dest = File.join(@lora_dir, l[:file])
         if File.exist?(dest)
           return [self, set_error_toast("#{l[:name]} is already installed")]
         end
         return [self, start_lora_download(l[:repo], l[:file], l[:size])]
-      elsif idx == RECOMMENDED_LORAS.length
+      elsif idx == rec_count
         return enter_lora_hf_search_mode
       else
         return enter_lora_civitai_search_mode
@@ -5891,8 +6082,10 @@ class Chewy
       Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("Loading...")
     end
 
+    family = current_model_family
+    family_suffix = family ? " [#{family}]" : ""
     title = case @lora_download_view
-    when :recommended then "Recommended LoRAs"
+    when :recommended then "Recommended LoRAs#{family_suffix}"
     when :files then "Files in #{@lora_selected_repo_id}"
     else "#{source_label} LoRAs"
     end
@@ -6103,14 +6296,42 @@ class Chewy
   end
 
   def render_lora_content
-    if @available_loras.empty?
-      dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
-      return dim.render("No LoRAs found in #{@lora_dir}")
+    family = current_model_family
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    muted = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+
+    # Header: show current model family filter
+    header_parts = []
+    if family
+      family_info = MODEL_FAMILIES[family]
+      family_label = family_info ? family_info[:label] : family
+      header_parts << Lipgloss::Style.new.foreground(Theme.WARNING).render("Family: #{family_label}")
+    else
+      header_parts << muted.render("No model selected \u2014 showing all LoRAs")
     end
 
+    # Active LoRA stack summary
+    if @selected_loras.any?
+      stack = @selected_loras.map { |l| "#{l[:name]}:#{l[:weight]}" }.join(", ")
+      header_parts << Lipgloss::Style.new.foreground(Theme.SUCCESS).render("Active: #{stack}")
+    end
+
+    header = header_parts.join("  \u2502  ")
+
+    if @available_loras.empty? && (@incompatible_loras || []).empty?
+      return "#{header}\n#{dim.render("No LoRAs found in #{@lora_dir}")}"
+    end
+
+    if @available_loras.empty?
+      incompat_count = (@incompatible_loras || []).length
+      return "#{header}\n#{dim.render("No compatible LoRAs for #{family}")}\n#{muted.render("#{incompat_count} incompatible LoRA(s) hidden")}"
+    end
+
+    # LoRA list
     lines = @available_loras.each_with_index.map do |lora, i|
       sel = @selected_loras.find { |l| l[:path] == lora[:path] }
       selected = i == @lora_index
+      meta = lora_metadata(lora)
 
       check = if sel
         Lipgloss::Style.new.foreground(Theme.SUCCESS).render("[x]")
@@ -6126,22 +6347,97 @@ class Chewy
         ""
       end
 
-      if selected
+      # Family badge
+      lora_fam = lora[:family]
+      fam_badge = if lora_fam
+        Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" [#{lora_fam}]")
+      else
+        Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" [?]")
+      end
+
+      # Type badge
+      type_badge = if meta[:lora_type]
+        Lipgloss::Style.new.foreground(Theme.SECONDARY).render(" #{LORA_TYPE_LABELS[meta[:lora_type]] || meta[:lora_type]}")
+      else
+        ""
+      end
+
+      line = if selected
         cursor = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true).render("> ")
         name = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true).render(lora[:name])
-        "#{cursor}#{check} #{name}#{weight}"
+        "#{cursor}#{check} #{name}#{fam_badge}#{type_badge}#{weight}"
       else
-        "  #{check} #{lora[:name]}#{weight}"
+        "  #{check} #{lora[:name]}#{fam_badge}#{type_badge}#{weight}"
       end
+
+      # Expanded card for selected LoRA
+      if selected && @lora_card_expanded && meta[:desc]
+        line += render_lora_card(lora, meta)
+      elsif selected && meta[:desc]
+        line += "\n     #{dim.render(meta[:desc])}"
+      end
+
+      line
     end
-    lines.join("\n")
+
+    # Show count of hidden incompatible LoRAs
+    incompat_note = if (@incompatible_loras || []).any?
+      "\n#{muted.render("\u2500" * 30)}\n#{muted.render("#{@incompatible_loras.length} incompatible LoRA(s) hidden (different family)")}"
+    else
+      ""
+    end
+
+    "#{header}\n#{lines.join("\n")}#{incompat_note}"
+  end
+
+  def render_lora_card(lora, meta)
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    muted = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+    accent = Lipgloss::Style.new.foreground(Theme.ACCENT)
+    success = Lipgloss::Style.new.foreground(Theme.SUCCESS)
+    pad = "     "
+
+    card = +"\n"
+    card << "#{pad}#{dim.render("\u250C" + "\u2500" * 40 + "\u2510")}\n"
+
+    # Name and type
+    type_label = meta[:lora_type] ? (LORA_TYPE_LABELS[meta[:lora_type]] || meta[:lora_type].to_s) : "Unknown"
+    card << "#{pad}#{dim.render("\u2502")} #{accent.render("Type:")} #{type_label.to_s.ljust(33)}#{dim.render("\u2502")}\n"
+
+    # Use for / Avoid
+    if meta[:use_for]
+      card << "#{pad}#{dim.render("\u2502")} #{success.render("Use:")}  #{meta[:use_for][0..32].ljust(33)}#{dim.render("\u2502")}\n"
+    end
+    if meta[:avoid]
+      card << "#{pad}#{dim.render("\u2502")} #{Lipgloss::Style.new.foreground(Theme.ERROR).render("Avoid:")} #{meta[:avoid][0..30].ljust(31)}#{dim.render("\u2502")}\n"
+    end
+
+    # Weight range
+    if meta[:recommended_weight]
+      w = meta[:recommended_weight]
+      card << "#{pad}#{dim.render("\u2502")} #{accent.render("Weight:")} #{w[:min]}\u2013#{w[:max]} (default: #{w[:default]})#{" " * [0, 18 - "#{w[:min]}-#{w[:max]} (default: #{w[:default]})".length].max}#{dim.render("\u2502")}\n"
+    end
+
+    # Description
+    if meta[:desc]
+      card << "#{pad}#{dim.render("\u2502")} #{muted.render(meta[:desc][0..38].ljust(39))}#{dim.render("\u2502")}\n"
+    end
+
+    # Tags
+    if meta[:tags]&.any?
+      tags_str = meta[:tags].join(", ")[0..38]
+      card << "#{pad}#{dim.render("\u2502")} #{dim.render("Tags: #{tags_str}").to_s[0..38].ljust(39)}#{dim.render("\u2502")}\n"
+    end
+
+    card << "#{pad}#{dim.render("\u2514" + "\u2500" * 40 + "\u2518")}"
+    card
   end
 
   def render_lora_status
     if @editing_lora_weight
       "enter: confirm | esc: cancel"
     else
-      "space: toggle | +/-: weight | w: edit | d: download | esc: close"
+      "space: toggle | i: details | +/-: weight | w: edit | d: download | esc: close"
     end
   end
 
