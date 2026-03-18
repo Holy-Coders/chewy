@@ -1422,6 +1422,8 @@ class Chewy
     @kitty_graphics = %w[ghostty kitty WezTerm].any? { |t|
       ENV["TERM_PROGRAM"]&.downcase&.include?(t.downcase) || ENV["TERM"]&.include?(t.downcase)
     }
+    @kitty_image_id = 0  # auto-incrementing image ID for kitty protocol
+    @kitty_overlay_pending = nil  # {path:, row:, col:, w:, h:, slot:} set during view, processed after lipgloss
 
     # Models
     @models_dir = ENV["CHEWY_MODELS_DIR"] || @config["model_dir"] || File.expand_path("~/models")
@@ -1788,6 +1790,7 @@ class Chewy
   def view
     apply_theme_styles
     @chip_hit_map = []
+    @kitty_overlay_pending = nil
 
     # Shrink dimensions for padding: 2 chars left/right, 1 line top/bottom
     saved_w = @width; saved_h = @height
@@ -1824,7 +1827,16 @@ class Chewy
     # the terminal default. Re-apply the surface background after every reset so
     # the theme color persists across all styled text.
     bg_seq = surface_bg_escape
-    output.gsub("\e[0m", "\e[0m#{bg_seq}")
+    result = output.gsub("\e[0m", "\e[0m#{bg_seq}")
+
+    # Kitty overlay: append after all lipgloss processing is done
+    # so the APC sequences don't interfere with width calculations
+    if @kitty_graphics && @kitty_overlay_pending
+      result << build_kitty_overlay(@kitty_overlay_pending)
+      @kitty_overlay_pending = nil
+    end
+
+    result
   end
 
   private
@@ -2107,6 +2119,7 @@ class Chewy
     @model_list.width = @width - 8 if @model_list
     @model_list.height = [@height - 10, 6].max if @model_list
     @preview_cache = nil # invalidate on resize
+    clear_kitty_images if @kitty_graphics
     resize_download_lists if @overlay == :download
   end
 
@@ -2840,6 +2853,7 @@ class Chewy
     when FOCUS_PROMPT then @prompt_input.blur
     when FOCUS_NEGATIVE then @negative_input.blur
     end
+    clear_kitty_images if @kitty_graphics
     @overlay = name
     @error_message = nil
 
@@ -3846,6 +3860,13 @@ class Chewy
 
     body = Lipgloss.join_horizontal(:top, list_panel, preview_panel)
 
+    # Register kitty overlay for file picker thumbnail
+    if @kitty_graphics && entry && entry[:type] == :file && @file_picker_target != :cn_model && File.exist?(entry[:path])
+      picker_img_row = 1 + 1 + 1 + 1
+      picker_img_col = 2 + 1 + list_w + 1 + 1
+      @kitty_overlay_pending = { path: entry[:path], row: picker_img_row, col: picker_img_col, w: preview_w - 4, h: inner_h - 4, slot: 22 }
+    end
+
     picker_title = case @file_picker_target
     when :cn_model then "Select ControlNet Model"
     when :controlnet then "Select ControlNet Image"
@@ -3866,6 +3887,8 @@ class Chewy
   end
 
   def file_picker_thumb(path, max_w, max_h)
+    return render_image(path, max_w, max_h, kitty_overlay: true) if @kitty_graphics
+
     cached = @file_picker_thumb_cache[path]
     return cached if cached
 
@@ -4100,10 +4123,134 @@ class Chewy
     print "\e_Ga=d,d=A,q=2\e\\"
   end
 
-  # Route to halfblocks for lipgloss-compatible rendering
-  # Kitty graphics are used only in fullscreen mode (render_fullscreen_image)
-  # because lipgloss miscounts kitty escape sequences as visible characters
-  def render_image(path, max_w, max_h, pixelate: nil, corner_radius: 0)
+  # Kitty unicode placeholder inline renderer
+  # Transmits the image to the terminal, then returns a string of U+10EEEE
+  # placeholder characters that lipgloss can measure as normal text.
+  # The terminal replaces those cells with actual image pixels.
+  KITTY_PLACEHOLDER = "\u{10EEEE}".freeze
+  # Combining diacritical marks for encoding row/column indices in kitty placeholders.
+  # From the Kitty graphics protocol spec — zero-width combining characters.
+  KITTY_DIACRITICS = [
+    0x0305, 0x030D, 0x030E, 0x0310, 0x0312, 0x033D, 0x033E, 0x033F,
+    0x0346, 0x034A, 0x034B, 0x034C, 0x0350, 0x0351, 0x0352, 0x0353,
+    0x0354, 0x0355, 0x0357, 0x0358, 0x035B, 0x035D, 0x035E, 0x0360,
+    0x0361, 0x0362, 0x0338, 0x0337, 0x0489,
+    0x20D0, 0x20D1, 0x20D2, 0x20D3, 0x20D4, 0x20D5, 0x20D6, 0x20D7,
+    0x20DB, 0x20DC, 0x20E1, 0x20E7, 0x20E9, 0x20EA, 0x20EB, 0x20EC,
+    0x20ED, 0x20EE, 0x20EF, 0x20F0,
+  ].freeze
+
+  def render_image_kitty_inline(path, max_w, max_h)
+    return nil unless @kitty_graphics
+    return nil unless path && File.exist?(path) && File.size(path) > 0
+
+    png_data = File.binread(path)
+    image = ChunkyPNG::Image.from_file(path)
+
+    # Compute fit dimensions
+    cell_ratio = 2.0
+    img_cols = image.width.to_f
+    img_rows = image.height.to_f / cell_ratio
+
+    scale_c = max_w / img_cols
+    scale_r = max_h / img_rows
+    scale = [scale_c, scale_r].min
+
+    fit_cols = (img_cols * scale).floor.clamp(1, max_w)
+    fit_rows = (img_rows * scale).floor.clamp(1, max_h)
+    # Clamp to diacritics table size
+    fit_rows = [fit_rows, KITTY_DIACRITICS.length].min
+    fit_cols = [fit_cols, KITTY_DIACRITICS.length].min
+
+    # Unique image ID (1-based, fits in 24-bit color)
+    @kitty_image_id = (@kitty_image_id % 0xFFFFFE) + 1
+    img_id = @kitty_image_id
+
+    # Step 1: Transmit image data (a=t = store only)
+    encoded = Base64.strict_encode64(png_data)
+    chunks = encoded.scan(/.{1,4096}/)
+    chunks.each_with_index do |chunk, i|
+      more = (i < chunks.length - 1) ? 1 : 0
+      if i == 0
+        $stdout.write "\e_Gf=100,a=t,i=#{img_id},q=2,m=#{more};#{chunk}\e\\"
+      else
+        $stdout.write "\e_Gm=#{more};#{chunk}\e\\"
+      end
+    end
+
+    # Step 2: Create virtual placement
+    $stdout.write "\e_Ga=p,U=1,i=#{img_id},c=#{fit_cols},r=#{fit_rows},q=2\e\\"
+    $stdout.flush
+
+    # Encode image ID as RGB foreground color
+    id_r = (img_id >> 16) & 0xFF
+    id_g = (img_id >> 8) & 0xFF
+    id_b = img_id & 0xFF
+
+    # Step 3: Build placeholder grid — explicit row+col diacritics on every cell
+    lines = fit_rows.times.map do |row|
+      row_diac = KITTY_DIACRITICS[row]
+      line = +"\e[38;2;#{id_r};#{id_g};#{id_b}m"
+      fit_cols.times do |col|
+        col_diac = KITTY_DIACRITICS[col]
+        line << KITTY_PLACEHOLDER << [row_diac, col_diac].pack("UU")
+      end
+      line << "\e[39m"
+      line
+    end
+
+    lines.join("\n")
+  rescue
+    nil
+  end
+
+  # Build a kitty overlay string: cursor-position + display image + restore cursor.
+  # Appended to the view string AFTER lipgloss, so APC escapes don't affect layout.
+  def build_kitty_overlay(req)
+    path = req[:path]
+    return "" unless path && File.exist?(path) && File.size(path) > 0
+
+    image = ChunkyPNG::Image.from_file(path)
+    cell_ratio = 2.0
+    img_cols = image.width.to_f
+    img_rows = image.height.to_f / cell_ratio
+    scale = [req[:w] / img_cols, req[:h] / img_rows].min
+    fit_cols = (img_cols * scale).floor.clamp(1, req[:w])
+    fit_rows = (img_rows * scale).floor.clamp(1, req[:h])
+
+    # Center the image within the target area
+    col = req[:col] + [(req[:w] - fit_cols) / 2, 0].max
+    row = req[:row]
+
+    slot = req[:slot]
+    encoded = Base64.strict_encode64(File.binread(path))
+    chunks = encoded.scan(/.{1,4096}/)
+
+    overlay = +""
+    overlay << "\e_Ga=d,d=I,i=#{slot},q=2\e\\"  # delete previous
+    overlay << "\e[s"                              # save cursor
+    overlay << "\e[#{row};#{col}H"                 # move to position
+
+    chunks.each_with_index do |chunk, i|
+      more = (i < chunks.length - 1) ? 1 : 0
+      if i == 0
+        overlay << "\e_Gf=100,a=T,c=#{fit_cols},r=#{fit_rows},i=#{slot},q=2,m=#{more};#{chunk}\e\\"
+      else
+        overlay << "\e_Gm=#{more};#{chunk}\e\\"
+      end
+    end
+
+    overlay << "\e[u"  # restore cursor
+    overlay
+  rescue
+    ""
+  end
+
+  def render_image(path, max_w, max_h, pixelate: nil, corner_radius: 0, kitty_overlay: false)
+    # When kitty overlay will handle this image, return blank space for layout only.
+    if kitty_overlay && @kitty_graphics
+      return ("\n" * [max_h - 1, 0].max)
+    end
     render_image_halfblocks(path, max_w, max_h, pixelate: pixelate, corner_radius: corner_radius)
   end
 
@@ -4119,6 +4266,21 @@ class Chewy
     if @confirm_apply_best_settings && @pending_best_settings_img2img
       result += render_best_settings_popup
     end
+
+    # Register kitty overlay for main preview — must match render_image_preview dimensions
+    if @kitty_graphics && !@generating && @last_output_path && File.exist?(@last_output_path) && @reveal_phase.nil?
+      rw = right_panel_width
+      prompt_h, negative_h, params_h = left_panel_heights
+      total_left = prompt_h + negative_h + params_h
+      # These match render_right_panel: render_image_preview(rw - 2, total_left)
+      img_w = rw - 2
+      img_h = total_left
+      # Terminal position (1-based): outer padding (2 cols, 1 row) + left panel + right panel padding (1 col)
+      img_col = 2 + left_panel_width + 1 + 1  # outer_pad_left + left_panel + right_panel_pad_left (1-based)
+      img_row = 1 + 1  # outer_pad_top + header
+      @kitty_overlay_pending = { path: @last_output_path, row: img_row, col: img_col, w: img_w, h: img_h, slot: 20 }
+    end
+
     result
   end
 
@@ -4257,7 +4419,7 @@ class Chewy
                  [64, 32, 20, 14, 10, 7, 5, 3, 2, nil][@reveal_phase]
                end
 
-    img_str = render_image(@last_output_path, max_w, max_h, pixelate: pixelate, corner_radius: 3)
+    img_str = render_image(@last_output_path, max_w, max_h, pixelate: pixelate, corner_radius: 3, kitty_overlay: @kitty_graphics)
     if img_str
       result = center_image(img_str, max_w)
       # Only cache at full resolution
@@ -5136,6 +5298,17 @@ class Chewy
 
     body = Lipgloss.join_horizontal(:top, list_panel, preview_panel)
 
+    # Register kitty overlay for gallery thumbnail
+    if @kitty_graphics && entry[:path] && File.exist?(entry[:path])
+      # Gallery layout: outer padding(1,2) → outer padding(0,1) → title_bar → body(list_panel | preview_panel)
+      # preview_panel has border(:rounded) = 1 char each side, padding(0,1) = 1 col each side
+      # Rows: 1 outer_pad + 1 title_bar + 1 border_top + 1 = 4
+      # Cols: 2 outer_pad + 1 outer_padding + list_w + 1 border + 1 padding = list_w + 5
+      gallery_img_row = 1 + 1 + 1 + 1
+      gallery_img_col = 2 + 1 + list_w + 1 + 1
+      @kitty_overlay_pending = { path: entry[:path], row: gallery_img_row, col: gallery_img_col, w: preview_w - 4, h: thumb_h, slot: 21 }
+    end
+
     title_bar = title_style.render("Gallery") + "  " + dim.render("#{@gallery_images.length} images")
     outer = Lipgloss::Style.new.padding(0, 1).render(
       Lipgloss.join_vertical(:left, title_bar, body)
@@ -5151,6 +5324,9 @@ class Chewy
   end
 
   def gallery_thumb(path, max_w, max_h)
+    # Skip cache when kitty overlay handles rendering
+    return render_image(path, max_w, max_h, kitty_overlay: true) if @kitty_graphics
+
     cached = @gallery_thumb_cache[path]
     return cached if cached
 
