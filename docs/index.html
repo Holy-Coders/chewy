@@ -654,6 +654,7 @@
         <li><a href="#gallery">Gallery</a></li>
         <li><a href="#shortcuts">Shortcuts</a></li>
         <li><a href="#install">Install</a></li>
+        <li><a href="docs.html">Docs</a></li>
         <li>
           <a href="https://github.com/Holy-Coders/chewy" class="nav-gh">
             <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -671,7 +672,7 @@
   <!-- Hero -->
   <section class="hero">
     <div class="container">
-      <div class="hero-badge" id="version-badge">v0.3.0 &mdash; Multi-provider image generation</div>
+      <div class="hero-badge" id="version-badge">v0.5.0 &mdash; CivitAI integration, help overlay, LoRA compatibility</div>
       <h1>AI image generation<br><span class="gradient">in your terminal.</span></h1>
       <p>Chewy is a beautiful TUI for generating images with Stable Diffusion, FLUX, DALL-E, Imagen, and more. Run locally or connect to cloud providers &mdash; your choice.</p>
       <div class="hero-actions">
@@ -753,7 +754,7 @@
         <div class="feature-card">
           <div class="feature-icon" style="background:var(--primary-glow);color:var(--primary);">&#x1f310;</div>
           <h3>6 Generation Providers</h3>
-          <p>Local sd.cpp, OpenAI (DALL-E/GPT Image), A1111 (Automatic1111), Google Gemini (Imagen 3), HuggingFace, and any OpenAI-compatible API.</p>
+          <p>Local sd.cpp, OpenAI (DALL-E/GPT Image), Google Gemini (Imagen 3), HuggingFace, OpenAI-compatible APIs, and more.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon" style="background:#50fa7b22;color:var(--success);">&#x1f512;</div>
@@ -767,8 +768,8 @@
         </div>
         <div class="feature-card">
           <div class="feature-icon" style="background:#8be9fd22;color:var(--cyan);">&#x1f4e5;</div>
-          <h3>Model Browser & Recommendations</h3>
-          <p>Curated starter models for new users, plus a full HuggingFace browser. Download, search, and install models without leaving the terminal.</p>
+          <h3>Model & LoRA Browser</h3>
+          <p>Curated starter models and LoRAs. Browse HuggingFace and CivitAI to download, search, and install without leaving the terminal.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon" style="background:#f1fa8c22;color:var(--yellow);">&#x1f3ac;</div>
@@ -782,8 +783,8 @@
         </div>
         <div class="feature-card">
           <div class="feature-icon" style="background:#bd93f922;color:#bd93f9;">&#x1f5bc;</div>
-          <h3>img2img, LoRA & History</h3>
-          <p>Use images as starting points via file browser or clipboard paste. Apply LoRA weights, browse generation history with full metadata.</p>
+          <h3>img2img, LoRAs & Prompt History</h3>
+          <p>Use images as starting points. Download, browse, and apply LoRAs with adjustable weights. Prompt history persists across sessions.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon" style="background:#50fa7b22;color:var(--success);">&#x1f5a5;</div>
@@ -837,6 +838,8 @@
         <div class="key-item"><kbd>^x</kbd> <span>Cancel generation</span></div>
         <div class="key-item"><kbd>^r</kbd> <span>Randomize seed</span></div>
         <div class="key-item"><kbd>^u</kbd> <span>Clear init image</span></div>
+        <div class="key-item"><kbd>^w</kbd> <span>Clear &amp; start fresh</span></div>
+        <div class="key-item"><kbd>F1</kbd> <span>Help overlay</span></div>
         <div class="key-item"><kbd>^q</kbd> <span>Quit</span></div>
       </div>
     </div>
@@ -906,6 +909,7 @@
         chewy
       </div>
       <ul class="links">
+        <li><a href="docs.html">Docs</a></li>
         <li><a href="https://github.com/Holy-Coders/chewy">GitHub</a></li>
         <li><a href="https://github.com/Holy-Coders/chewy/issues">Issues</a></li>
         <li><a href="https://github.com/Holy-Coders/chewy/blob/main/LICENSE">License</a></li>
@@ -942,7 +946,7 @@
         if (data.tag_name) {
           var version = data.tag_name.replace(/^v/, '');
           var badge = document.getElementById('version-badge');
-          badge.textContent = 'v' + version + ' \u2014 Multi-provider image generation';
+          badge.textContent = 'v' + version + ' \u2014 CivitAI integration, help overlay, LoRA compatibility';
         }
       })
       .catch(function() {});

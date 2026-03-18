@@ -12,6 +12,10 @@
   Built with the <a href="https://github.com/nicholasgasior/ruby-bubbletea">Charm Ruby</a> ecosystem (bubbletea, lipgloss, bubbles). Supports local generation via <a href="https://github.com/leejet/stable-diffusion.cpp">stable-diffusion.cpp</a> and 5 cloud providers.
 </p>
 
+<p align="center">
+  <a href="https://chewytui.xyz">Website</a> &bull; <a href="https://chewytui.xyz/docs.html">Documentation</a> &bull; <a href="https://github.com/Holy-Coders/chewy/issues">Issues</a>
+</p>
+
 ---
 
 ## Install
@@ -38,7 +42,10 @@ Set `SD_BIN` to point to your `sd` binary if it's not on your PATH.
 ## Usage
 
 ```bash
-chewy
+chewy              # Launch the TUI
+chewy list          # List all generated images
+chewy delete FILE   # Delete a generated image
+chewy help          # Show help
 ```
 
 ### Providers
@@ -61,9 +68,10 @@ API keys are entered in-app (stored securely with chmod 600) or via environment 
 |-----|--------|
 | `tab` | Cycle focus between prompt, negative prompt, and params |
 | `enter` | Generate image (when in prompt/negative) |
+| `up/down` | Cycle through prompt history (in prompt field) |
 | `^y` | Switch provider |
 | `^n` | Open model picker |
-| `^d` | Download models from HuggingFace |
+| `^d` | Download models (HuggingFace / CivitAI) |
 | `^t` | Theme picker (10 themes) |
 | `^a` | Gallery |
 | `^g` | Generation history |
@@ -75,26 +83,42 @@ API keys are entered in-app (stored securely with chmod 600) or via environment 
 | `^e` | Open last image in viewer |
 | `^f` | Fullscreen image preview |
 | `^x` | Cancel generation |
+| `^w` | Clear prompt and image (start fresh) |
 | `^r` | Randomize seed |
+| `F1` | Help overlay (all shortcuts) |
 | `^q` | Quit |
 
 ### Models
 
-Place `.gguf`, `.safetensors`, or `.ckpt` model files in `~/models` (or set `CHEWY_MODELS_DIR`).
+Place `.gguf`, `.safetensors`, or `.ckpt` model files in `~/models` (or set `CHEWY_MODELS_DIR`). Full filenames are shown in the model picker.
 
 Chewy also scans for models from:
 - **DiffusionBee** (`~/.diffusionbee`)
 - **Draw Things** (`~/Library/Containers/com.liuliu.draw-things/Data/Documents/Models`)
 
-Press `^d` inside chewy to browse recommended starter models or search HuggingFace directly. Curated picks include SD 1.5, SD 3.5 Medium, SDXL Turbo, DreamShaper, and FLUX.1 Schnell.
+Press `^d` inside chewy to browse recommended starter models or search HuggingFace and CivitAI. Curated picks include SD 1.5, SD 3.5 Medium, SDXL Turbo, DreamShaper, and FLUX.1 Schnell.
 
 ### FLUX models
 
 FLUX models require companion files (clip_l, t5xxl, vae). Chewy will automatically download these when you first try to generate with a FLUX model. You'll need a [HuggingFace token](https://huggingface.co/settings/tokens) with read access.
 
+### LoRAs
+
+Place LoRA `.safetensors` files in `~/loras` (or set `CHEWY_LORA_DIR`). Press `^l` to open the LoRA selector where you can toggle LoRAs on/off, adjust weights (0.0-2.0), and download new ones.
+
+Press `d` in the LoRA panel to browse recommended LoRAs or search HuggingFace and CivitAI. Recommended picks include Detail Tweaker, LCM LoRA (for fast generation), Pixel Art, and Papercut styles. Chewy warns if a LoRA doesn't match your model's architecture (e.g. SDXL LoRA on SD 1.5 model).
+
 ### Themes
 
-10 built-in color themes: Midnight (default), Dracula, Catppuccin, Tokyo Night, Gruvbox, Nord, Rose Pine, Solarized, Horizon, and Light. Press `^t` to switch. An animated pixel-art splash screen greets you on startup.
+10 built-in color themes: Midnight (default), Dracula, Catppuccin, Tokyo Night, Gruvbox, Nord, Rose Pine, Solarized, Horizon, and Light. Press `^t` to switch. CLI commands (help, list, etc.) also use your selected theme colors. An animated pixel-art splash screen greets you on startup.
+
+### Presets
+
+Press `^p` to open the preset picker. Built-in presets include fast, quality, portrait, flux-fast, and flux-quality configurations. Save your own custom presets with your preferred settings.
+
+### Prompt History
+
+Chewy remembers your prompt history across sessions. Press `up/down` in the prompt field to cycle through previous prompts. History is loaded from your generation metadata on disk, so past prompts are available even in a fresh session.
 
 ### Samplers & Schedulers
 
@@ -106,7 +130,7 @@ Press `^b` to browse for an input image, or `^v` to paste from clipboard. Adjust
 
 ### Configuration
 
-Config is stored at `~/.config/sdtui/config.yml`. You can also set:
+Config is stored at `~/.config/sdtui/config.yml`. Presets are stored at `~/.config/sdtui/presets.yml`.
 
 | Env var | Description |
 |---------|-------------|
@@ -144,6 +168,7 @@ This is a single-file app:
 - `Gemfile` / `Gemfile.lock` — Ruby dependencies
 - `VERSION` — semver, read at runtime and used by CI for releases
 - `Formula/` — Homebrew formulas (sd-cpp and chewy)
+- `docs/` — Landing page and documentation (GitHub Pages)
 - `logo.jpeg` — the logo
 
 ### Dependencies

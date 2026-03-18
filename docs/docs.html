@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chewy Docs — Complete Guide</title>
+  <meta name="description" content="Complete documentation for Chewy, the terminal UI for AI image generation.">
+  <link rel="icon" href="assets/logo.jpeg">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
+
+    :root {
+      --bg: #0a0a0f;
+      --bg-card: #12121a;
+      --bg-terminal: #0d0d14;
+      --border: #1e1e2e;
+      --border-glow: #874bfd33;
+      --text: #e2e2e8;
+      --text-dim: #6e6e82;
+      --text-muted: #44445a;
+      --primary: #874bfd;
+      --primary-glow: #874bfd44;
+      --accent: #ff6b9d;
+      --accent-glow: #ff6b9d33;
+      --success: #50fa7b;
+      --cyan: #8be9fd;
+      --yellow: #f1fa8c;
+      --mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+      --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+    }
+
+    .glow-bg {
+      position: fixed;
+      top: -50%; left: -50%;
+      width: 200%; height: 200%;
+      background: radial-gradient(ellipse at 30% 20%, var(--primary-glow) 0%, transparent 50%),
+                  radial-gradient(ellipse at 70% 80%, var(--accent-glow) 0%, transparent 50%);
+      pointer-events: none;
+      z-index: -1;
+    }
+
+    /* Nav */
+    nav {
+      position: fixed;
+      top: 0; width: 100%;
+      z-index: 100;
+      background: rgba(10, 10, 15, 0.8);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+    nav .inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 60px;
+    }
+    .nav-logo {
+      display: flex; align-items: center; gap: 10px;
+      text-decoration: none; color: var(--text);
+      font-weight: 700; font-size: 18px;
+    }
+    .nav-logo img { height: 32px; border-radius: 8px; }
+    .nav-links { display: flex; align-items: center; gap: 28px; list-style: none; }
+    .nav-links a {
+      color: var(--text-dim); text-decoration: none;
+      font-size: 14px; font-weight: 500; transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text); }
+    .nav-links a.active { color: var(--primary); }
+
+    /* Layout */
+    .page { display: flex; max-width: 1100px; margin: 0 auto; padding: 80px 24px 60px; gap: 48px; }
+
+    /* Sidebar */
+    .sidebar {
+      position: sticky; top: 80px;
+      width: 220px; flex-shrink: 0;
+      max-height: calc(100vh - 100px);
+      overflow-y: auto;
+    }
+    .sidebar h4 {
+      font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.1em;
+      color: var(--text-muted); margin: 20px 0 8px;
+    }
+    .sidebar h4:first-child { margin-top: 0; }
+    .sidebar a {
+      display: block; padding: 4px 0;
+      font-size: 13px; color: var(--text-dim);
+      text-decoration: none; transition: color 0.2s;
+    }
+    .sidebar a:hover { color: var(--text); }
+
+    /* Content */
+    .content { flex: 1; min-width: 0; }
+    .content h1 {
+      font-size: 36px; font-weight: 700;
+      letter-spacing: -0.02em; margin-bottom: 8px;
+    }
+    .content h1 .gradient {
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .content > .subtitle {
+      font-size: 16px; color: var(--text-dim); margin-bottom: 48px;
+    }
+    .content h2 {
+      font-size: 24px; font-weight: 700;
+      margin: 48px 0 16px; padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+    .content h2:first-of-type { margin-top: 0; border-top: none; padding-top: 0; }
+    .content h3 {
+      font-size: 18px; font-weight: 600;
+      margin: 32px 0 12px; color: var(--text);
+    }
+    .content p { margin-bottom: 16px; color: var(--text-dim); }
+    .content ul, .content ol {
+      margin: 0 0 16px 20px; color: var(--text-dim);
+    }
+    .content li { margin-bottom: 6px; }
+    .content strong { color: var(--text); }
+
+    /* Code blocks */
+    code {
+      font-family: var(--mono); font-size: 13px;
+      background: var(--bg-terminal); border: 1px solid var(--border);
+      border-radius: 4px; padding: 2px 6px;
+    }
+    pre {
+      background: var(--bg-terminal); border: 1px solid var(--border);
+      border-radius: 8px; padding: 16px 20px;
+      font-family: var(--mono); font-size: 13px;
+      line-height: 1.7; overflow-x: auto; margin-bottom: 16px;
+    }
+    pre code { background: none; border: none; padding: 0; }
+    .prompt { color: var(--success); }
+    .flag { color: var(--cyan); }
+
+    /* Tables */
+    table {
+      width: 100%; border-collapse: collapse;
+      margin-bottom: 16px; font-size: 14px;
+    }
+    th {
+      text-align: left; padding: 10px 14px;
+      border-bottom: 2px solid var(--border);
+      color: var(--text); font-weight: 600;
+    }
+    td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-dim);
+    }
+    td code { font-size: 12px; }
+
+    /* Tip boxes */
+    .tip {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-left: 3px solid var(--primary);
+      border-radius: 8px; padding: 16px 20px;
+      margin-bottom: 16px; font-size: 14px;
+    }
+    .tip strong { color: var(--primary); }
+    .tip p { margin-bottom: 0; }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 40px 0;
+    }
+    footer .inner {
+      max-width: 1100px; margin: 0 auto; padding: 0 24px;
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 16px;
+    }
+    footer .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
+    footer .brand img { height: 24px; border-radius: 6px; }
+    footer .links { display: flex; gap: 24px; list-style: none; }
+    footer .links a { color: var(--text-dim); text-decoration: none; font-size: 13px; transition: color 0.2s; }
+    footer .links a:hover { color: var(--text); }
+    footer .copy { font-size: 12px; color: var(--text-muted); }
+
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .page { padding-top: 80px; }
+      .nav-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="glow-bg"></div>
+
+  <nav>
+    <div class="inner">
+      <a href="index.html" class="nav-logo">
+        <img src="assets/logo.jpeg" alt="Chewy">
+        chewy
+      </a>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="index.html#features">Features</a></li>
+        <li><a href="index.html#install">Install</a></li>
+        <li><a href="docs.html" class="active">Docs</a></li>
+        <li><a href="https://github.com/Holy-Coders/chewy">GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="page">
+    <aside class="sidebar">
+      <h4>Getting Started</h4>
+      <a href="#installation">Installation</a>
+      <a href="#first-run">First Run</a>
+      <a href="#providers">Providers</a>
+
+      <h4>Core Features</h4>
+      <a href="#generating">Generating Images</a>
+      <a href="#models">Models</a>
+      <a href="#loras">LoRAs</a>
+      <a href="#img2img">img2img</a>
+      <a href="#presets">Presets</a>
+      <a href="#prompt-history">Prompt History</a>
+
+      <h4>Interface</h4>
+      <a href="#themes">Themes</a>
+      <a href="#gallery">Gallery</a>
+      <a href="#shortcuts">Keyboard Shortcuts</a>
+      <a href="#status-bar">Status Bar</a>
+
+      <h4>Advanced</h4>
+      <a href="#samplers">Samplers & Schedulers</a>
+      <a href="#flux">FLUX Models</a>
+      <a href="#controlnet">ControlNet</a>
+      <a href="#configuration">Configuration</a>
+      <a href="#cli">CLI Commands</a>
+    </aside>
+
+    <main class="content">
+      <h1><span class="gradient">Documentation</span></h1>
+      <p class="subtitle">Everything you need to know about using Chewy for AI image generation.</p>
+
+      <!-- Getting Started -->
+
+      <h2 id="installation">Installation</h2>
+
+      <h3>Homebrew (recommended)</h3>
+      <p>The fastest way to get started. This installs both Chewy and the stable-diffusion.cpp inference engine with Metal GPU acceleration.</p>
+      <pre><code><span class="prompt">$</span> brew install Holy-Coders/chewy/chewy
+<span class="prompt">$</span> chewy</code></pre>
+
+      <h3>From source</h3>
+      <p>Requires Ruby 4.0+ and <a href="https://github.com/leejet/stable-diffusion.cpp" style="color:var(--primary);">stable-diffusion.cpp</a> on your PATH.</p>
+      <pre><code><span class="prompt">$</span> git clone https://github.com/Holy-Coders/chewy.git
+<span class="prompt">$</span> cd chewy && bundle install
+<span class="prompt">$</span> ruby chewy.rb</code></pre>
+      <p>Set <code>SD_BIN</code> to point to your <code>sd</code> binary if it's not on your PATH.</p>
+
+      <h3>Building stable-diffusion.cpp</h3>
+      <pre><code><span class="prompt">$</span> git clone --recursive https://github.com/leejet/stable-diffusion.cpp
+<span class="prompt">$</span> cd stable-diffusion.cpp
+<span class="prompt">$</span> mkdir build && cd build
+<span class="prompt">$</span> cmake .. <span class="flag">-DSD_METAL=ON</span>    # macOS with Metal GPU
+<span class="prompt">$</span> cmake --build . --config Release
+<span class="prompt">$</span> cp bin/sd-cli /usr/local/bin/sd</code></pre>
+
+      <h2 id="first-run">First Run</h2>
+      <p>When you first launch Chewy, it will:</p>
+      <ul>
+        <li>Create a config file at <code>~/.config/sdtui/config.yml</code></li>
+        <li>Scan for models in <code>~/models</code> (and DiffusionBee/Draw Things directories)</li>
+        <li>Show an animated splash screen</li>
+        <li>Check for updates</li>
+      </ul>
+      <div class="tip">
+        <p><strong>No models yet?</strong> Press <code>^d</code> to open the model downloader. Start with "Stable Diffusion 1.5 (Q8)" for the best beginner experience — it's fast, low VRAM, and produces good results.</p>
+      </div>
+
+      <h2 id="providers">Providers</h2>
+      <p>Chewy supports 6 image generation backends. Press <code>^y</code> to switch between them.</p>
+
+      <table>
+        <thead><tr><th>Provider</th><th>Models</th><th>Type</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Local (sd.cpp)</strong></td><td>SD 1.x/2.x/3.5, SDXL, FLUX</td><td>Local</td></tr>
+          <tr><td><strong>OpenAI</strong></td><td>GPT Image 1, DALL-E 3, DALL-E 2</td><td>API</td></tr>
+          <tr><td><strong>Gemini</strong></td><td>Imagen 3, Imagen 3 Fast, Gemini 2.0 Flash</td><td>API</td></tr>
+          <tr><td><strong>HuggingFace</strong></td><td>FLUX.1 Schnell/Dev, SDXL, SD 3.5 Large, HiDream</td><td>API</td></tr>
+          <tr><td><strong>OpenAI-Compatible</strong></td><td>Any model via custom endpoint</td><td>API</td></tr>
+        </tbody>
+      </table>
+
+      <p>API keys can be set via environment variables (<code>OPENAI_API_KEY</code>, <code>GEMINI_API_KEY</code>, <code>HUGGINGFACE_API_KEY</code>) or entered in-app. Keys are stored with chmod 600 permissions.</p>
+
+      <!-- Core Features -->
+
+      <h2 id="generating">Generating Images</h2>
+      <p>The main interface has three focus areas you can cycle through with <code>tab</code>:</p>
+      <ol>
+        <li><strong>Prompt</strong> — describe what you want to generate</li>
+        <li><strong>Negative prompt</strong> — describe what you want to avoid</li>
+        <li><strong>Parameters</strong> — steps, CFG scale, dimensions, seed, sampler, scheduler, threads</li>
+      </ol>
+      <p>Press <code>enter</code> while in the prompt or negative prompt field to start generating. The right panel shows a live preview (when available) and the final result.</p>
+
+      <div class="tip">
+        <p><strong>Batch generation:</strong> Set the <code>batch</code> parameter to generate multiple images in sequence with different seeds.</p>
+      </div>
+
+      <h2 id="models">Models</h2>
+      <p>Place model files (<code>.gguf</code>, <code>.safetensors</code>, <code>.ckpt</code>) in <code>~/models</code>. Chewy also automatically scans:</p>
+      <ul>
+        <li><strong>DiffusionBee</strong> — <code>~/.diffusionbee</code></li>
+        <li><strong>Draw Things</strong> — <code>~/Library/Containers/com.liuliu.draw-things/Data/Documents/Models</code></li>
+      </ul>
+      <p>Press <code>^n</code> to open the model picker. Full filenames (with extension) are displayed. Press <code>p</code> in the model picker to pin frequently used models to the top.</p>
+
+      <h3>Downloading models</h3>
+      <p>Press <code>^d</code> to open the model downloader. You'll see recommended starter models:</p>
+      <table>
+        <thead><tr><th>Model</th><th>Type</th><th>Best for</th></tr></thead>
+        <tbody>
+          <tr><td>Stable Diffusion 1.5 (Q8)</td><td>SD 1.5</td><td>Learning, fast generation</td></tr>
+          <tr><td>Stable Diffusion 3.5 Medium (Q5)</td><td>SD 3.5</td><td>Quality/speed balance</td></tr>
+          <tr><td>SDXL Turbo (Q4)</td><td>SDXL</td><td>Real-time, 1-4 steps</td></tr>
+          <tr><td>DreamShaper v7 LCM (F16)</td><td>SD 1.5</td><td>Artistic, 4-8 steps</td></tr>
+          <tr><td>FLUX.1 Schnell (Q4)</td><td>FLUX</td><td>State-of-the-art quality</td></tr>
+        </tbody>
+      </table>
+      <p>Select "Browse HuggingFace..." or "Browse CivitAI..." to search for models online. CivitAI is the largest community hub for Stable Diffusion models. Downloads support resume — if interrupted, just try again.</p>
+
+      <h2 id="loras">LoRAs</h2>
+      <p>LoRAs (Low-Rank Adaptations) are small add-on weights that modify a base model's style or capabilities. Place LoRA <code>.safetensors</code> files in <code>~/loras</code>.</p>
+
+      <h3>Using LoRAs</h3>
+      <p>Press <code>^l</code> to open the LoRA selector:</p>
+      <ul>
+        <li><code>space</code> / <code>enter</code> — toggle a LoRA on/off</li>
+        <li><code>+</code> / <code>-</code> — adjust weight (0.0 to 2.0)</li>
+        <li><code>w</code> — type an exact weight value</li>
+        <li><code>d</code> — open the LoRA downloader</li>
+      </ul>
+      <p>Multiple LoRAs can be active simultaneously. Weights control how strongly the LoRA affects the output (1.0 = full effect).</p>
+
+      <h3>Downloading LoRAs</h3>
+      <p>Press <code>d</code> in the LoRA panel to browse recommended LoRAs or search HuggingFace and CivitAI:</p>
+      <table>
+        <thead><tr><th>LoRA</th><th>Compatible</th><th>Use case</th></tr></thead>
+        <tbody>
+          <tr><td>Detail Tweaker</td><td>SD 1.5</td><td>Enhance or reduce fine details</td></tr>
+          <tr><td>LCM LoRA (SD 1.5)</td><td>SD 1.5</td><td>Generate in 4-8 steps instead of 20+</td></tr>
+          <tr><td>LCM LoRA (SDXL)</td><td>SDXL</td><td>Fast generation for SDXL models</td></tr>
+          <tr><td>Pixel Art</td><td>SDXL</td><td>Pixel art style outputs</td></tr>
+          <tr><td>Papercut</td><td>SD 1.5</td><td>Paper cutout art style</td></tr>
+        </tbody>
+      </table>
+
+      <div class="tip">
+        <p><strong>LoRA compatibility:</strong> LoRAs must match your base model architecture. An SD 1.5 LoRA won't work with an SDXL model and vice versa. Chewy will warn you if it detects a mismatch when you try to generate.</p>
+      </div>
+
+      <h2 id="img2img">img2img</h2>
+      <p>Use an existing image as a starting point for generation:</p>
+      <ul>
+        <li><code>^b</code> — browse your filesystem for an image</li>
+        <li><code>^v</code> — paste an image from your clipboard</li>
+        <li><code>^u</code> — clear the init image (return to txt2img)</li>
+      </ul>
+      <p>The <code>strength</code> parameter (0.0-1.0) controls how much the output differs from the input. Lower values stay closer to the original; higher values allow more creative freedom.</p>
+
+      <h2 id="presets">Presets</h2>
+      <p>Press <code>^p</code> to open the preset picker. Chewy includes built-in presets optimized for common use cases:</p>
+      <ul>
+        <li><strong>fast</strong> — fewer steps, quick iteration</li>
+        <li><strong>quality</strong> — more steps, better results</li>
+        <li><strong>portrait</strong> — optimized for portraits</li>
+        <li><strong>flux-fast</strong> — FLUX-specific fast settings</li>
+        <li><strong>flux-quality</strong> — FLUX-specific quality settings</li>
+      </ul>
+      <p>In the preset panel:</p>
+      <ul>
+        <li><code>enter</code> — load the selected preset</li>
+        <li><code>s</code> — save current settings as a new preset</li>
+        <li><code>d</code> — delete a custom preset</li>
+      </ul>
+      <p>Custom presets are saved to <code>~/.config/sdtui/presets.yml</code>.</p>
+
+      <h2 id="prompt-history">Prompt History</h2>
+      <p>Chewy remembers every prompt you've used across sessions. Press <code>up</code> / <code>down</code> while in the prompt field to cycle through your history.</p>
+      <p>History is loaded from your generation metadata files on disk, so even in a fresh session you'll have access to all your past prompts. New prompts from the current session are appended on top.</p>
+
+      <!-- Interface -->
+
+      <h2 id="themes">Themes</h2>
+      <p>Press <code>^t</code> to open the theme picker. 10 built-in themes:</p>
+      <ul>
+        <li>Midnight (default), Dracula, Catppuccin, Tokyo Night, Gruvbox</li>
+        <li>Nord, Rose Pine, Solarized, Horizon, Light</li>
+      </ul>
+      <p>Themes affect the entire interface including the status bar, overlays, and CLI commands (help, list, etc.).</p>
+
+      <h2 id="gallery">Gallery</h2>
+      <p>Press <code>^a</code> to open the gallery, which shows all your generated images. Navigate with arrow keys or <code>j</code>/<code>k</code>.</p>
+      <ul>
+        <li><code>enter</code> / <code>space</code> — fullscreen preview</li>
+        <li><code>^e</code> — open in your system image viewer</li>
+        <li><code>p</code> — load the prompt and settings from this image</li>
+        <li><code>delete</code> / <code>backspace</code> — delete the image</li>
+      </ul>
+
+      <h2 id="shortcuts">Keyboard Shortcuts</h2>
+
+      <h3>Global</h3>
+      <table>
+        <thead><tr><th>Key</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td><code>tab</code></td><td>Cycle focus (prompt / negative / params)</td></tr>
+          <tr><td><code>shift+tab</code></td><td>Cycle focus backwards</td></tr>
+          <tr><td><code>enter</code></td><td>Generate image</td></tr>
+          <tr><td><code>^y</code></td><td>Switch provider</td></tr>
+          <tr><td><code>^n</code></td><td>Model picker</td></tr>
+          <tr><td><code>^d</code></td><td>Download models</td></tr>
+          <tr><td><code>^t</code></td><td>Theme picker</td></tr>
+          <tr><td><code>^a</code></td><td>Gallery</td></tr>
+          <tr><td><code>^l</code></td><td>LoRA selector</td></tr>
+          <tr><td><code>^p</code></td><td>Presets</td></tr>
+          <tr><td><code>^b</code></td><td>Browse for init image</td></tr>
+          <tr><td><code>^v</code></td><td>Paste image from clipboard</td></tr>
+          <tr><td><code>^u</code></td><td>Clear init image</td></tr>
+          <tr><td><code>^e</code></td><td>Open last image in viewer</td></tr>
+          <tr><td><code>^f</code></td><td>Fullscreen preview</td></tr>
+          <tr><td><code>^x</code></td><td>Cancel generation</td></tr>
+          <tr><td><code>^w</code></td><td>Clear prompt and image (start fresh)</td></tr>
+          <tr><td><code>^r</code></td><td>Randomize seed</td></tr>
+          <tr><td><code>F1</code></td><td>Help overlay (all shortcuts)</td></tr>
+          <tr><td><code>^q</code></td><td>Quit</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Prompt field</h3>
+      <table>
+        <thead><tr><th>Key</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td><code>up</code></td><td>Previous prompt from history</td></tr>
+          <tr><td><code>down</code></td><td>Next prompt from history</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Parameter editing</h3>
+      <table>
+        <thead><tr><th>Key</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td><code>j</code> / <code>k</code></td><td>Navigate params</td></tr>
+          <tr><td><code>enter</code></td><td>Edit selected param</td></tr>
+          <tr><td><code>h</code> / <code>l</code></td><td>Decrease / increase value</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="status-bar">Status Bar</h2>
+      <p>The bottom bar shows contextual information:</p>
+      <ul>
+        <li><strong>After generation:</strong> output filename, generation time, seed</li>
+        <li><strong>During generation:</strong> progress bar, step count, ETA, speed</li>
+        <li><strong>Toast messages:</strong> confirmations (theme changed, model downloaded, etc.) that auto-dismiss after 3 seconds</li>
+        <li><strong>Errors:</strong> red background with error description, auto-dismiss after 5 seconds</li>
+      </ul>
+      <p>The right side of the bar shows context-sensitive keyboard shortcuts.</p>
+
+      <!-- Advanced -->
+
+      <h2 id="samplers">Samplers & Schedulers</h2>
+      <p>Chewy supports 14 samplers and 9 schedulers for local generation. These control the denoising process and significantly affect image quality and style.</p>
+
+      <h3>Samplers</h3>
+      <p><code>euler</code>, <code>euler_a</code>, <code>heun</code>, <code>dpm2</code>, <code>dpm++2s_a</code>, <code>dpm++2m</code>, <code>dpm++2mv2</code>, <code>ipndm</code>, <code>ipndm_v</code>, <code>lcm</code>, <code>ddim_trailing</code>, <code>tcd</code>, <code>res_multistep</code>, <code>res_2s</code></p>
+      <div class="tip">
+        <p><strong>Recommended:</strong> <code>euler_a</code> is a great default. For LCM models/LoRAs, use <code>lcm</code>. For fast generation, try <code>dpm++2m</code>.</p>
+      </div>
+
+      <h3>Schedulers</h3>
+      <p><code>discrete</code>, <code>karras</code>, <code>exponential</code>, <code>ays</code>, <code>gits</code>, <code>sgm_uniform</code>, <code>simple</code>, <code>smoothstep</code>, <code>kl_optimal</code></p>
+
+      <h2 id="flux">FLUX Models</h2>
+      <p>FLUX is a state-of-the-art image generation architecture. FLUX models require companion files that Chewy will auto-download on first use:</p>
+      <ul>
+        <li><strong>clip_l.safetensors</strong> — CLIP text encoder</li>
+        <li><strong>t5xxl_fp16.safetensors</strong> — T5-XXL text encoder</li>
+        <li><strong>ae.safetensors</strong> — VAE decoder</li>
+      </ul>
+      <p>You'll need a <a href="https://huggingface.co/settings/tokens" style="color:var(--primary);">HuggingFace token</a> with read access. Enter it when prompted, or set it via the HuggingFace Token overlay (<code>^h</code> in the model picker).</p>
+
+      <div class="tip">
+        <p><strong>FLUX Schnell vs Dev:</strong> Schnell is faster (4-8 steps) but less flexible. Dev produces higher quality but needs more steps (20-50). Schnell doesn't work well with img2img.</p>
+      </div>
+
+      <h2 id="controlnet">ControlNet</h2>
+      <p>ControlNet allows you to guide generation using a reference image's structure (edges, depth, pose). It's supported for SD 1.5, SD 2.x, and SDXL models (not FLUX).</p>
+      <p>To use ControlNet, you need both a ControlNet image and a ControlNet model file. These can be selected via the file picker.</p>
+
+      <h2 id="configuration">Configuration</h2>
+      <p>Config is stored at <code>~/.config/sdtui/config.yml</code>. Most settings can be changed in-app, but you can also set these environment variables:</p>
+
+      <table>
+        <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>SD_BIN</code></td><td><code>sd</code> (on PATH)</td><td>Path to the stable-diffusion.cpp binary</td></tr>
+          <tr><td><code>CHEWY_MODELS_DIR</code></td><td><code>~/models</code></td><td>Directory containing model files</td></tr>
+          <tr><td><code>CHEWY_OUTPUT_DIR</code></td><td><code>./outputs</code></td><td>Directory for generated images</td></tr>
+          <tr><td><code>CHEWY_LORA_DIR</code></td><td><code>~/loras</code></td><td>Directory containing LoRA files</td></tr>
+          <tr><td><code>OPENAI_API_KEY</code></td><td>&mdash;</td><td>OpenAI API key</td></tr>
+          <tr><td><code>GEMINI_API_KEY</code></td><td>&mdash;</td><td>Google Gemini API key</td></tr>
+          <tr><td><code>HUGGINGFACE_API_KEY</code></td><td>&mdash;</td><td>HuggingFace API key</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="cli">CLI Commands</h2>
+      <p>Chewy also provides CLI commands for managing generated images outside the TUI:</p>
+      <pre><code><span class="prompt">$</span> chewy              # Launch the TUI
+<span class="prompt">$</span> chewy list          # List all generated images with metadata
+<span class="prompt">$</span> chewy delete FILE   # Delete a generated image (with confirmation)
+<span class="prompt">$</span> chewy help          # Show help</code></pre>
+      <p>CLI output uses your configured theme colors.</p>
+
+    </main>
+  </div>
+
+  <footer>
+    <div class="inner">
+      <div class="brand">
+        <img src="assets/logo.jpeg" alt="Chewy">
+        chewy
+      </div>
+      <ul class="links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="https://github.com/Holy-Coders/chewy">GitHub</a></li>
+        <li><a href="https://github.com/Holy-Coders/chewy/issues">Issues</a></li>
+      </ul>
+      <div class="copy">MIT &copy; 2026 Holy Coders</div>
+    </div>
+  </footer>
+</body>
+</html>

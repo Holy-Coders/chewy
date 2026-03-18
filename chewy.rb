@@ -22,7 +22,9 @@ CHEWY_REPO = "Holy-Coders/chewy"
 
 HF_API_BASE = "https://huggingface.co/api"
 HF_DOWNLOAD_BASE = "https://huggingface.co"
+CIVITAI_API_BASE = "https://civitai.com/api/v1"
 MODEL_EXTENSIONS = %w[.gguf .safetensors .ckpt].freeze
+DOWNLOAD_SOURCES = [:huggingface, :civitai].freeze
 
 # Common macOS app model directories
 EXTRA_MODEL_DIRS = [
@@ -136,6 +138,50 @@ PRELOADED_MODELS = [
     size: 6_876_948_608,
     type: "FLUX",
     desc: "State-of-the-art FLUX — needs companion files (auto-downloaded)",
+  },
+].freeze
+
+# Curated list of recommended LoRAs for new users
+RECOMMENDED_LORAS = [
+  {
+    name: "Detail Tweaker (SD 1.5)",
+    repo: "jbilcke-hf/sd-lora-detail-tweaker",
+    file: "detail_tweaker.safetensors",
+    size: 36_000_000,
+    compat: "SD 1.5",
+    desc: "Enhance or reduce fine details — works with any SD 1.5 model",
+  },
+  {
+    name: "LCM LoRA (SD 1.5)",
+    repo: "latent-consistency/lcm-lora-sdv1-5",
+    file: "pytorch_lora_weights.safetensors",
+    size: 67_000_000,
+    compat: "SD 1.5",
+    desc: "Latent Consistency — generate in 4-8 steps instead of 20+",
+  },
+  {
+    name: "LCM LoRA (SDXL)",
+    repo: "latent-consistency/lcm-lora-sdxl",
+    file: "pytorch_lora_weights.safetensors",
+    size: 394_000_000,
+    compat: "SDXL",
+    desc: "Latent Consistency for SDXL — fast generation, fewer steps",
+  },
+  {
+    name: "Pixel Art (SD 1.5)",
+    repo: "nerijs/pixel-art-xl",
+    file: "pixel-art-xl.safetensors",
+    size: 44_000_000,
+    compat: "SDXL",
+    desc: "Generate pixel art style images",
+  },
+  {
+    name: "Papercut (SD 1.5)",
+    repo: "Norod78/sd15-papercut-lora",
+    file: "papercut.safetensors",
+    size: 36_000_000,
+    compat: "SD 1.5",
+    desc: "Paper cutout art style — use 'papercut' in prompt",
   },
 ].freeze
 
@@ -332,6 +378,46 @@ end
 class ClipboardPasteMessage < Bubbletea::Message
   attr_reader :path, :error
   def initialize(path: nil, error: nil) @path = path; @error = error end
+end
+
+class StatusDismissMessage < Bubbletea::Message
+  attr_reader :generation
+  def initialize(generation:) @generation = generation end
+end
+
+class ErrorDismissMessage < Bubbletea::Message
+  attr_reader :generation
+  def initialize(generation:) @generation = generation end
+end
+
+class LoraDownloadDoneMessage < Bubbletea::Message
+  attr_reader :path, :filename
+  def initialize(path:, filename:) @path = path; @filename = filename end
+end
+
+class LoraDownloadErrorMessage < Bubbletea::Message
+  attr_reader :error
+  def initialize(error:) @error = error end
+end
+
+class LoraReposFetchedMessage < Bubbletea::Message
+  attr_reader :repos
+  def initialize(repos:) @repos = repos end
+end
+
+class LoraReposFetchErrorMessage < Bubbletea::Message
+  attr_reader :error
+  def initialize(error:) @error = error end
+end
+
+class LoraFilesFetchedMessage < Bubbletea::Message
+  attr_reader :files, :repo_id
+  def initialize(files:, repo_id:) @files = files; @repo_id = repo_id end
+end
+
+class LoraFilesFetchErrorMessage < Bubbletea::Message
+  attr_reader :error
+  def initialize(error:) @error = error end
 end
 
 class ModelValidatedMessage < Bubbletea::Message
@@ -1357,8 +1443,8 @@ class Chewy
     @negative_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
     @negative_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
 
-    # Prompt history
-    @prompt_history = []
+    # Prompt history (seeded from on-disk generation history)
+    @prompt_history = load_prompt_history_from_disk
     @history_index = -1
     @saved_prompt = ""
 
@@ -1392,8 +1478,11 @@ class Chewy
     @progress = Bubbles::Progress.new(width: 30, gradient: [Theme.PRIMARY, Theme.ACCENT])
     @last_output_path = nil
     @last_generation_time = nil
-    @status_message = @first_run ? "Config created at #{CONFIG_PATH}" : nil
+    @status_message = nil
+    @status_generation = 0
+    @first_run_toast = @first_run
     @error_message = nil
+    @error_generation = 0
 
     # Paths
     bundled_sd = File.join(__dir__, "bin", "sd")
@@ -1466,9 +1555,11 @@ class Chewy
 
     # Download browser
     @download_view = :recommended
+    @download_source = :huggingface  # :huggingface or :civitai
     @remote_repos = []; @remote_files = []
     @repo_list = nil; @file_list = nil; @recommended_list = nil
     @selected_repo_id = nil
+    @civitai_models = []  # cached CivitAI search results with version/file info
     @fetching = false
     @model_downloading = false
     @download_dest = nil; @download_total = 0; @download_filename = ""
@@ -1485,6 +1576,22 @@ class Chewy
     @lora_index = 0
     @editing_lora_weight = false
     @lora_weight_buffer = ""
+
+    # LoRA download
+    @lora_download_view = :recommended
+    @lora_download_source = :huggingface
+    @lora_remote_repos = []; @lora_remote_files = []
+    @lora_repo_list = nil; @lora_file_list = nil; @lora_recommended_list = nil
+    @lora_selected_repo_id = nil
+    @lora_civitai_models = []
+    @lora_downloading = false
+    @lora_download_dest = nil; @lora_download_total = 0; @lora_download_filename = ""
+    @lora_search_input = Bubbles::TextInput.new
+    @lora_search_input.placeholder = "Search HuggingFace LoRAs..."
+    @lora_search_input.prompt = ""
+    @lora_search_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
+    @lora_search_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
+    @lora_search_focused = false
 
     # Presets
     @user_presets = load_presets
@@ -1614,7 +1721,9 @@ class Chewy
     scan_loras
     _spinner, spinner_cmd = @spinner.init
     splash_cmd = Bubbletea.tick(0.4) { SplashTickMessage.new(phase: 1) }
-    [self, Bubbletea.batch(spinner_cmd, splash_cmd)]
+    cmds = [spinner_cmd, splash_cmd]
+    cmds << set_status_toast("Config created at #{CONFIG_PATH}") if @first_run_toast
+    [self, Bubbletea.batch(*cmds)]
   end
 
   # ========== Update ==========
@@ -1636,30 +1745,46 @@ class Chewy
       @last_output_path = message.output_path
       @last_generation_time = message.elapsed
       @preview_cache = nil
-      @status_message = nil; @error_message = nil
-      [self, nil]
+      @error_message = nil
+      output_msg = "output: #{File.basename(message.output_path)} \u2502 #{message.elapsed}s"
+      output_msg += " \u2502 seed #{@last_seed}" if @last_seed
+      [self, set_status_toast(output_msg)]
     when RevealTickMessage
       handle_reveal_tick(message)
     when GenerationErrorMessage
       @generating = false; @gen_pid = nil; @gen_start_time = nil
-      @error_message = message.error; @status_message = nil
-      [self, nil]
+      @status_message = nil
+      [self, set_error_toast(message.error)]
     when ReposFetchedMessage
       handle_repos_fetched(message)
     when ReposFetchErrorMessage
-      @fetching = false; @error_message = "Fetch failed: #{message.error}"
-      [self, nil]
+      @fetching = false
+      [self, set_error_toast("Fetch failed: #{message.error}")]
     when FilesFetchedMessage
       handle_files_fetched(message)
     when FilesFetchErrorMessage
-      @fetching = false; @error_message = "Fetch failed: #{message.error}"
-      [self, nil]
+      @fetching = false
+      [self, set_error_toast("Fetch failed: #{message.error}")]
     when ModelDownloadDoneMessage
       handle_download_done(message)
     when ModelDownloadErrorMessage
       @model_downloading = false; @download_dest = nil; @download_filename = ""
-      @error_message = "Download failed: #{message.error}"
-      [self, nil]
+      [self, set_error_toast("Download failed: #{message.error}")]
+    when LoraDownloadDoneMessage
+      handle_lora_download_done(message)
+    when LoraDownloadErrorMessage
+      @lora_downloading = false; @lora_download_dest = nil; @lora_download_filename = ""
+      [self, set_error_toast("Download failed: #{message.error}")]
+    when LoraReposFetchedMessage
+      handle_lora_repos_fetched(message)
+    when LoraReposFetchErrorMessage
+      @fetching = false
+      [self, set_error_toast("Fetch failed: #{message.error}")]
+    when LoraFilesFetchedMessage
+      handle_lora_files_fetched(message)
+    when LoraFilesFetchErrorMessage
+      @fetching = false
+      [self, set_error_toast("Fetch failed: #{message.error}")]
     when CompanionDownloadDoneMessage
       @companion_remaining -= 1
       # Start next companion download (sequential with progress)
@@ -1672,15 +1797,21 @@ class Chewy
     when ClipboardPasteMessage
       if message.error
         @error_message = message.error
+        [self, nil]
       else
         @init_image_path = message.path
-        @status_message = "Pasted image: #{File.basename(message.path)}"
+        [self, set_status_toast("Pasted image: #{File.basename(message.path)}")]
       end
-      [self, nil]
     when ModelValidatedMessage
       handle_model_validated(message)
     when SplashTickMessage
       handle_splash_tick(message)
+    when StatusDismissMessage
+      @status_message = nil if message.generation == @status_generation
+      [self, nil]
+    when ErrorDismissMessage
+      @error_message = nil if message.generation == @error_generation
+      [self, nil]
     when Bubbletea::KeyMessage
       return dismiss_splash if @splash
       handle_key(message)
@@ -1713,6 +1844,8 @@ class Chewy
         render_overlay_panel(title, render_models_content, render_models_status)
       when :download then render_download_view
       when :lora     then render_overlay_panel("LoRA Selection", render_lora_content, render_lora_status)
+      when :lora_download then render_lora_download_view
+      when :help then render_help_view
       when :preset   then render_overlay_panel("Presets", render_preset_content, render_preset_status)
       when :hf_token then render_overlay_panel("HuggingFace Token", render_hf_token_content, render_hf_token_status)
       when :gallery  then render_gallery_view
@@ -1786,7 +1919,8 @@ class Chewy
     files = dirs.flat_map { |d| Dir.glob(File.join(d, "**", ext_glob)) }
       .uniq
       .reject { |f| companion_names.include?(File.basename(f)) }
-      .reject { |f| File.size(f) < 100_000_000 }        # too small to be a diffusion model
+      .reject { |f| File.basename(f) =~ /\blora\b/i }   # LoRA weights, not diffusion models
+      .reject { |f| File.size(f) < 100_000_000 }         # too small to be a diffusion model
 
     # Sort: pinned first, recent second, rest alphabetical
     pinned = files.select { |f| @pinned_models.include?(f) }
@@ -1801,16 +1935,15 @@ class Chewy
       [{ title: "No models found", description: "Press d to download" }]
     else
       sorted.map do |f|
-        name = File.basename(f, File.extname(f))
-        ext = File.extname(f).delete(".").upcase
+        name = File.basename(f)
         prefix = @pinned_models.include?(f) ? "* " : "  "
         source = model_source_tag(f)
         type_tag = model_type_tag(f)
-        { title: "#{prefix}#{name}", description: "#{ext}#{type_tag}#{source}" }
+        { title: "#{prefix}#{name}", description: "#{type_tag}#{source}".strip }
       end
     end
 
-    @model_list = Bubbles::List.new(items, width: @width - 8, height: [@height - 10, 6].max)
+    @model_list = Bubbles::List.new(items, width: @width - 12, height: [@height - 10, 6].max)
     @model_list.show_title = false
     @model_list.show_status_bar = false
     @model_list.selected_item_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
@@ -1841,7 +1974,7 @@ class Chewy
       end
     end
 
-    @model_list = Bubbles::List.new(items, width: @width - 8, height: [@height - 10, 6].max)
+    @model_list = Bubbles::List.new(items, width: @width - 12, height: [@height - 10, 6].max)
     @model_list.show_title = false
     @model_list.show_status_bar = false
     @model_list.selected_item_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
@@ -1987,6 +2120,24 @@ class Chewy
     [self, nil]
   end
 
+  # Set a toast status message that auto-dismisses after 3 seconds.
+  # Returns a tick command that should be returned from update.
+  def set_status_toast(msg)
+    @status_message = msg
+    @status_generation += 1
+    gen = @status_generation
+    Bubbletea.tick(3.0) { StatusDismissMessage.new(generation: gen) }
+  end
+
+  # Set an error message that auto-dismisses after 5 seconds.
+  # Returns a tick command that should be returned from update.
+  def set_error_toast(msg)
+    @error_message = msg
+    @error_generation += 1
+    gen = @error_generation
+    Bubbletea.tick(5.0) { ErrorDismissMessage.new(generation: gen) }
+  end
+
   def render_splash
     logo_path = File.join(__dir__, "logo.png")
     dim = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
@@ -2023,7 +2174,7 @@ class Chewy
     @prompt_input.width = lw - 6
     @negative_input.width = lw - 6
     @progress = Bubbles::Progress.new(width: [right_panel_width - 10, 20].max, gradient: [Theme.PRIMARY, Theme.ACCENT])
-    @model_list.width = @width - 8 if @model_list
+    @model_list.width = @width - 12 if @model_list
     @model_list.height = [@height - 10, 6].max if @model_list
     @preview_cache = nil # invalidate on resize
     clear_kitty_images if @kitty_graphics
@@ -2236,13 +2387,23 @@ class Chewy
     when "ctrl+v" then return paste_image_from_clipboard        # v = paste image
     when "ctrl+u"
       unless @focus == FOCUS_PROMPT || @focus == FOCUS_NEGATIVE
-        @init_image_path = nil; @status_message = "Init image cleared"; return [self, nil]
+        @init_image_path = nil; return [self, set_status_toast("Init image cleared")]
       end
     when "ctrl+x" then if @generating; @gen_cancelled = true; @provider.cancel(@gen_pid) if @provider.capabilities.cancel && @gen_pid; end; return [self, nil]
     when "ctrl+y" then return toggle_overlay(:provider)
+    when "f1", "ctrl+]" then return toggle_overlay(:help)
     when "tab"    then cycle_focus; return [self, nil]
     when "shift+tab" then cycle_focus(reverse: true); return [self, nil]
+    when "ctrl+w"
+      # Clear prompt, image, and reset to starting state
+      @prompt_input.value = ""; @negative_input.value = ""
+      @last_output_path = nil; @last_generation_time = nil; @last_seed = nil
+      @init_image_path = nil; @preview_cache = nil; @preview_path = nil
+      clear_kitty_images if @kitty_graphics
+      @focus = FOCUS_PROMPT; @prompt_input.focus; @negative_input.blur
+      return [self, set_status_toast("Cleared")]
     end
+
 
     case @focus
     when FOCUS_PROMPT  then handle_prompt_key(message)
@@ -2370,6 +2531,19 @@ class Chewy
 
   # ========== Prompt History ==========
 
+  def load_prompt_history_from_disk
+    dir = ENV["CHEWY_OUTPUT_DIR"] || @config["output_dir"] || "outputs"
+    return [] unless File.directory?(dir)
+
+    jsons = Dir.glob(File.join(dir, "*.json")).sort # oldest first
+    prompts = jsons.filter_map do |f|
+      data = JSON.parse(File.read(f)) rescue next
+      p = data["prompt"]&.strip
+      p unless p.nil? || p.empty?
+    end
+    prompts.uniq.last(100)
+  end
+
   def add_to_prompt_history(text)
     return if text.empty?
     @prompt_history.pop if @prompt_history.last == text
@@ -2440,6 +2614,34 @@ class Chewy
     end
   end
 
+  def detect_lora_type(name, path)
+    n = (name || File.basename(path, ".safetensors")).downcase
+    dir = File.dirname(path).downcase
+    combined = "#{dir}/#{n}"
+    if combined.include?("flux")
+      "FLUX"
+    elsif combined.include?("sdxl") || combined.include?("sd_xl") || combined.include?("xl")
+      "SDXL"
+    elsif combined.include?("sd15") || combined.include?("sd1.") || combined.include?("sd_1") || combined.include?("v1-") || combined.include?("v1_")
+      "SD 1.x"
+    elsif combined.include?("sd2") || combined.include?("v2-")
+      "SD 2.x"
+    end
+  end
+
+  def lora_compatible?(name, path, model_type)
+    lora_type = detect_lora_type(name, path)
+    return true unless lora_type # unknown LoRA type — allow it
+    case model_type
+    when "FLUX" then lora_type == "FLUX"
+    when "SDXL" then lora_type == "SDXL"
+    when "SD 1.x" then lora_type == "SD 1.x"
+    when "SD 2.x" then lora_type == "SD 2.x"
+    when "SD3" then lora_type == "SD3"
+    else true
+    end
+  end
+
   # ========== FLUX Support ==========
 
   def flux_model?(path)
@@ -2506,11 +2708,10 @@ class Chewy
       @companion_current_file = ""
       @companion_dest = nil
       if @companion_errors.empty?
-        @status_message = "FLUX companion files ready"
+        return [self, set_status_toast("FLUX companion files ready")]
       else
-        @error_message = "Some downloads failed: #{@companion_errors.join(', ')}"
+        return [self, set_error_toast("Some downloads failed: #{@companion_errors.join(', ')}")]
       end
-      return [self, nil]
     end
 
     name, info = queue.first
@@ -2557,30 +2758,41 @@ class Chewy
     negative_text = @negative_input.value.strip
 
     if prompt_text.empty?
-      @error_message = "Prompt cannot be empty"; return [self, nil]
+      return [self, set_error_toast("Prompt cannot be empty")]
     end
 
     # Warn about Schnell + img2img — Schnell is distilled for txt2img and img2img results are poor
     if @init_image_path && @provider.provider_type == :local && @selected_model_path
       name = File.basename(@selected_model_path).downcase
       if name.include?("schnell")
-        @error_message = "Schnell models are poor at img2img — use FLUX Dev, SD 1.5, or SDXL instead"
-        return [self, nil]
+        return [self, set_error_toast("Schnell models are poor at img2img — use FLUX Dev, SD 1.5, or SDXL instead")]
       end
     end
 
     # ControlNet is not supported with FLUX models
     if @controlnet_model_path && @provider.provider_type == :local && @selected_model_path
       if flux_model?(@selected_model_path)
-        @error_message = "ControlNet is not supported with FLUX models — use SD 1.5, SD 2.x, or SDXL"
-        return [self, nil]
+        return [self, set_error_toast("ControlNet is not supported with FLUX models — use SD 1.5, SD 2.x, or SDXL")]
+      end
+    end
+
+    # Warn if selected LoRAs appear incompatible with the model architecture
+    if @selected_loras.any? && @provider.provider_type == :local && @selected_model_path
+      model_type = detect_model_type(@selected_model_path)
+      if model_type
+        mismatch = @selected_loras.find { |l| !lora_compatible?(l[:name], l[:path], model_type) }
+        if mismatch
+          lora_type = detect_lora_type(mismatch[:name], mismatch[:path])
+          lora_label = lora_type || "unknown type"
+          return [self, set_error_toast("LoRA \"#{mismatch[:name]}\" (#{lora_label}) may not work with #{model_type} model")]
+        end
       end
     end
 
     # Local provider needs a model file; remote providers use @remote_model_id
     if @provider.provider_type == :local
       unless @selected_model_path
-        @error_message = "No model selected"; return [self, nil]
+        return [self, set_error_toast("No model selected")]
       end
       if flux_model?(@selected_model_path) && !flux_companions_present?
         return download_flux_companions
@@ -2814,8 +3026,9 @@ class Chewy
       status = already ? " (installed)" : ""
       { title: "#{m[:name]}#{status}", description: "#{m[:type]} | #{format_bytes(m[:size])} — #{m[:desc]}" }
     end
-    items << { title: "Browse HuggingFace...", description: "Search for more models online" }
-    @recommended_list = Bubbles::List.new(items, width: @width - 8, height: [@height - 10, 6].max)
+    items << { title: "Browse HuggingFace...", description: "Search HuggingFace for GGUF and safetensors models" }
+    items << { title: "Browse CivitAI...", description: "Search CivitAI for community models and checkpoints" }
+    @recommended_list = Bubbles::List.new(items, width: @width - 12, height: [@height - 10, 6].max)
     @recommended_list.show_title = false
     @recommended_list.show_status_bar = false
     @recommended_list.selected_item_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
@@ -2824,17 +3037,61 @@ class Chewy
 
   def enter_hf_search_mode
     @download_view = :repos
+    @download_source = :huggingface
     @error_message = nil; @fetching = true
     @download_search_input.value = "gguf"
+    @download_search_input.placeholder = "Search HuggingFace models..."
     @download_search_input.focus
     @download_search_focused = true
     [self, fetch_repos_cmd("gguf")]
   end
 
+  def enter_civitai_search_mode
+    @download_view = :repos
+    @download_source = :civitai
+    @error_message = nil; @fetching = false
+    @download_search_input.value = ""
+    @download_search_input.placeholder = "Search CivitAI models..."
+    @download_search_input.focus
+    @download_search_focused = true
+    @repo_list = nil
+    [self, nil]
+  end
+
+  def fetch_civitai_models_cmd(query, type: "Checkpoint")
+    Proc.new do
+      params = "sort=Most+Downloaded&limit=50"
+      params += "&types=#{type}" if query.empty?  # types filter only works without query
+      params += "&query=#{URI.encode_www_form_component(query)}" unless query.empty?
+      uri = URI.parse("#{CIVITAI_API_BASE}/models?#{params}")
+      data = JSON.parse(hf_get(uri).body)
+      models = (data["items"] || []).map do |m|
+        latest = m["modelVersions"]&.first
+        files = (latest&.dig("files") || []).select { |f|
+          name = f["name"].downcase
+          name.end_with?(".safetensors") || name.end_with?(".gguf") || name.end_with?(".ckpt")
+        }
+        {
+          id: m["id"], name: m["name"], type: m["type"],
+          downloads: m["stats"]&.dig("downloadCount") || 0,
+          rating: m["stats"]&.dig("rating")&.round(1),
+          version_name: latest&.dig("name"),
+          base_model: latest&.dig("baseModel"),
+          files: files.map { |f| { name: f["name"], size: f["sizeKB"]&.*(1024)&.to_i, url: f["downloadUrl"] } },
+        }
+      end.select { |m| m[:files].any? && m[:type]&.upcase == type.upcase }.first(25)
+      ReposFetchedMessage.new(repos: models)
+    rescue => e
+      ReposFetchErrorMessage.new(error: e.message)
+    end
+  end
+
   def exit_download_mode
     @overlay = nil; @download_view = :recommended; @fetching = false
+    @download_source = :huggingface
     @repo_list = nil; @file_list = nil; @recommended_list = nil
     @remote_repos = []; @remote_files = []; @selected_repo_id = nil; @error_message = nil
+    @civitai_models = []
     @download_search_input.blur; @download_search_focused = false
     case @focus
     when FOCUS_PROMPT then @prompt_input.focus
@@ -2857,7 +3114,7 @@ class Chewy
   def fetch_repos_cmd(query = "gguf")
     search = URI.encode_www_form_component(query)
     Proc.new do
-      uri = URI.parse("#{HF_API_BASE}/models?pipeline_tag=text-to-image&search=#{search}&sort=downloads&direction=-1&limit=50")
+      uri = URI.parse("#{HF_API_BASE}/models?search=#{search}&sort=downloads&direction=-1&limit=50")
       all_repos = JSON.parse(hf_get(uri).body)
       repos = all_repos.select { |r| sdcpp_compatible_repo?(r) }.first(25)
       ReposFetchedMessage.new(repos: repos)
@@ -2870,10 +3127,19 @@ class Chewy
     @fetching = false; @remote_repos = message.repos
     @download_search_input.blur
     @download_search_focused = false
-    items = @remote_repos.map do |r|
-      { title: r["id"], description: "#{format_number(r["downloads"] || 0)} downloads" }
+    if @download_source == :civitai
+      @civitai_models = message.repos
+      items = message.repos.map do |m|
+        base = m[:base_model] ? " | #{m[:base_model]}" : ""
+        rating = m[:rating] ? " | #{m[:rating]}*" : ""
+        { title: m[:name], description: "#{format_number(m[:downloads])} downloads#{base}#{rating}" }
+      end
+    else
+      items = @remote_repos.map do |r|
+        { title: r["id"], description: "#{format_number(r["downloads"] || 0)} downloads" }
+      end
     end
-    items = [{ title: "No models found", description: "Try again later" }] if items.empty?
+    items = [{ title: "No models found", description: "Try a different search" }] if items.empty?
     @repo_list = Bubbles::List.new(items, width: @width - 4, height: @height - 9)
     @repo_list.title = ""
     @repo_list.show_status_bar = false
@@ -2887,6 +3153,7 @@ class Chewy
 
   def fetch_files_cmd(repo_id)
     @fetching = true; @selected_repo_id = repo_id
+    is_flux = repo_id.downcase.include?("flux")
     Proc.new do
       uri = URI.parse("#{HF_API_BASE}/models/#{repo_id}/tree/main")
       all = JSON.parse(hf_get(uri).body)
@@ -2894,10 +3161,15 @@ class Chewy
         next false unless f["type"] == "file"
         next false unless MODEL_EXTENSIONS.any? { |ext| f["path"].end_with?(ext) }
         basename = File.basename(f["path"]).downcase
-        # Filter out companion/auxiliary files
+        # Filter out companion/auxiliary files and LoRAs
         next false if COMPANION_FILE_PATTERNS.any? { |p| basename.start_with?(p) }
+        next false if basename =~ /\blora\b/i
+        # FLUX repos: only GGUF works with sd.cpp
+        next false if is_flux && !f["path"].end_with?(".gguf")
         true
       }
+      # Sort: .gguf first (preferred by sd.cpp), then by size descending
+      model_files.sort_by! { |f| [f["path"].end_with?(".gguf") ? 0 : 1, -(f["size"] || 0)] }
       FilesFetchedMessage.new(files: model_files, repo_id: repo_id)
     rescue => e
       FilesFetchErrorMessage.new(error: e.message)
@@ -2906,8 +3178,21 @@ class Chewy
 
   def handle_files_fetched(message)
     @fetching = false; @download_view = :files; @remote_files = message.files
-    items = @remote_files.map { |f| { title: f["path"], description: f["size"] ? format_bytes(f["size"]) : "unknown" } }
-    items = [{ title: "No model files found", description: "No .gguf or .safetensors" }] if items.empty?
+    is_flux_repo = (@selected_repo_id || "").downcase.include?("flux")
+    items = @remote_files.map do |f|
+      size_str = f["size"] ? format_bytes(f["size"]) : "unknown"
+      if f["path"].end_with?(".gguf")
+        quant = File.basename(f["path"]).match(/[_-](Q\d[_\w]*|F16|F32)/i)&.captures&.first&.upcase
+        label = quant ? "#{size_str} | #{quant}" : size_str
+        { title: f["path"], description: label }
+      else
+        { title: f["path"], description: size_str }
+      end
+    end
+    if items.empty?
+      no_files_msg = is_flux_repo ? "No GGUF files found — FLUX needs GGUF format. Try a repo like second-state/FLUX.1-dev-GGUF" : "No .gguf or .safetensors files found"
+      items = [{ title: "No compatible files", description: no_files_msg }]
+    end
     @file_list = Bubbles::List.new(items, width: @width - 4, height: @height - 9)
     @file_list.title = ""
     @file_list.show_status_bar = false
@@ -2944,10 +3229,10 @@ class Chewy
 
   def handle_download_done(message)
     @model_downloading = false; @download_dest = nil; @download_filename = ""
-    @status_message = "Downloaded #{message.filename}"; @error_message = nil
+    @error_message = nil
     scan_models
     @overlay = :models
-    [self, nil]
+    [self, set_status_toast("Downloaded #{message.filename}")]
   end
 
   # ========== Overlay Key Handling ==========
@@ -2960,6 +3245,8 @@ class Chewy
     when :models   then handle_models_panel_key(message)
     when :download then handle_download_key(message)
     when :lora     then handle_lora_panel_key(message)
+    when :lora_download then handle_lora_download_key(message)
+    when :help     then handle_help_key(message)
     when :preset   then handle_preset_panel_key(message)
     when :theme    then handle_theme_key(message)
     when :provider then handle_provider_key(message)
@@ -3092,9 +3379,8 @@ class Chewy
     size = File.size(path)
     File.delete(path)
     @selected_model_path = nil if @selected_model_path == path
-    @status_message = "Deleted #{File.basename(path)} (#{format_bytes(size)})"
     scan_models
-    [self, nil]
+    [self, set_status_toast("Deleted #{File.basename(path)} (#{format_bytes(size)})")]
   end
 
   # -- Download keys --
@@ -3146,13 +3432,13 @@ class Chewy
         m = PRELOADED_MODELS[idx]
         dest = File.join(@models_dir, m[:file])
         if File.exist?(dest)
-          @error_message = "#{m[:name]} is already installed"
-          return [self, nil]
+          return [self, set_error_toast("#{m[:name]} is already installed")]
         end
         return [self, start_model_download(m[:repo], m[:file], m[:size])]
-      else
-        # "Browse HuggingFace..." option
+      elsif idx == PRELOADED_MODELS.length
         return enter_hf_search_mode
+      else
+        return enter_civitai_search_mode
       end
     end
     @recommended_list, cmd = @recommended_list.update(message)
@@ -3171,11 +3457,21 @@ class Chewy
     key = message.to_s
     if key == "enter"
       query = @download_search_input.value.strip
-      return [self, nil] if query.empty?
-      @fetching = true
-      @download_search_input.blur
-      @download_search_focused = false
-      return [self, fetch_repos_cmd(query)]
+      if @download_source == :civitai
+        # CivitAI: empty query returns popular results
+        @fetching = true
+        @download_search_input.blur
+        @download_search_focused = false
+        return [self, fetch_civitai_models_cmd(query)]
+      else
+        return [self, nil] if query.empty?
+        # Auto-append gguf for FLUX searches — sd.cpp can't load raw FLUX safetensors
+        query += " gguf" if query.downcase.include?("flux") && !query.downcase.include?("gguf")
+        @fetching = true
+        @download_search_input.blur
+        @download_search_focused = false
+        return [self, fetch_repos_cmd(query)]
+      end
     end
     @download_search_input, cmd = @download_search_input.update(message)
     [self, cmd]
@@ -3191,9 +3487,16 @@ class Chewy
   def handle_repo_list_key(message)
     return [self, nil] unless @repo_list
     if message.to_s == "enter"
-      item = @repo_list.selected_item
-      return [self, fetch_files_cmd(item[:title])] if item && item[:title] != "No models found"
-      return [self, nil]
+      idx = @repo_list.selected_index rescue 0
+      if @download_source == :civitai
+        return [self, nil] if idx >= @civitai_models.length
+        m = @civitai_models[idx]
+        return show_civitai_files(m)
+      else
+        item = @repo_list.selected_item
+        return [self, fetch_files_cmd(item[:title])] if item && item[:title] != "No models found"
+        return [self, nil]
+      end
     end
     @repo_list, cmd = @repo_list.update(message)
     [self, cmd]
@@ -3202,15 +3505,62 @@ class Chewy
   def handle_file_list_key(message)
     return [self, nil] unless @file_list
     if message.to_s == "enter"
-      item = @file_list.selected_item
-      if item && item[:title] != "No model files found"
-        fd = @remote_files.find { |f| f["path"] == item[:title] }
-        return [self, start_model_download(@selected_repo_id, item[:title], fd&.dig("size") || 0)]
+      idx = @file_list.selected_index rescue 0
+      if @download_source == :civitai
+        return [self, nil] if idx >= (@civitai_selected_files || []).length
+        f = @civitai_selected_files[idx]
+        return [self, start_civitai_download(f[:name], f[:url], f[:size])]
+      else
+        item = @file_list.selected_item
+        if item && item[:title] != "No compatible files"
+          fd = @remote_files.find { |ff| ff["path"] == item[:title] }
+          return [self, start_model_download(@selected_repo_id, item[:title], fd&.dig("size") || 0)]
+        end
+        return [self, nil]
       end
-      return [self, nil]
     end
     @file_list, cmd = @file_list.update(message)
     [self, cmd]
+  end
+
+  def show_civitai_files(model)
+    @download_view = :files
+    @selected_repo_id = model[:name]
+    @civitai_selected_files = model[:files]
+    items = model[:files].map do |f|
+      { title: f[:name], description: f[:size] ? format_bytes(f[:size]) : "unknown" }
+    end
+    items = [{ title: "No compatible files", description: "" }] if items.empty?
+    @file_list = Bubbles::List.new(items, width: @width - 4, height: @height - 9)
+    @file_list.title = ""
+    @file_list.show_status_bar = false
+    @file_list.selected_item_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    @file_list.item_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    [self, nil]
+  end
+
+  def start_civitai_download(filename, url, size)
+    FileUtils.mkdir_p(@models_dir)
+    dest = File.join(@models_dir, filename); part = "#{dest}.part"
+    @model_downloading = true; @download_dest = part
+    @download_total = size || 0; @download_filename = filename; @error_message = nil
+    Proc.new do
+      _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",
+        "-C", "-", "--retry", "5", "--retry-delay", "3", "--retry-all-errors",
+        "--connect-timeout", "30", url)
+      if st.success?
+        File.rename(part, dest)
+        ModelDownloadDoneMessage.new(path: dest, filename: filename)
+      else
+        ModelDownloadErrorMessage.new(error: "Download failed (exit #{st.exitstatus}). Try again to resume.")
+      end
+    rescue Errno::ENOENT
+      File.delete(part) if File.exist?(part)
+      ModelDownloadErrorMessage.new(error: "curl not found")
+    rescue => e
+      File.delete(part) rescue nil
+      ModelDownloadErrorMessage.new(error: e.message)
+    end
   end
 
   def load_from_history(entry)
@@ -3239,7 +3589,7 @@ class Chewy
     end
   end
 
-  def offer_img2img_settings
+  def offer_img2img_settings(extra_cmd = nil)
     model_type = if @provider.provider_type == :local && @selected_model_path
       detect_model_type(@selected_model_path)
     end
@@ -3248,7 +3598,7 @@ class Chewy
       @pending_best_settings_type = model_type
       @pending_best_settings_img2img = true
     end
-    [self, nil]
+    [self, extra_cmd]
   end
 
   # -- Gallery keys --
@@ -3305,6 +3655,7 @@ class Chewy
     @gallery_thumb_cache.delete(entry[:path])
     @gallery_images.delete_at(@gallery_index)
     @gallery_index = [[@gallery_index, @gallery_images.length - 1].min, 0].max
+    clear_kitty_images if @kitty_graphics
   end
 
   # -- Fullscreen image view --
@@ -3373,6 +3724,8 @@ class Chewy
       adjust_lora_weight(@lora_index, 0.1)
     when "-"
       adjust_lora_weight(@lora_index, -0.1)
+    when "d"
+      return enter_lora_download_mode
     end
     [self, nil]
   end
@@ -3393,6 +3746,341 @@ class Chewy
     lora = @available_loras[idx]
     sel = @selected_loras.find { |l| l[:path] == lora[:path] }
     sel[:weight] = (sel[:weight] + delta).round(1).clamp(0.0, 2.0) if sel
+  end
+
+  # -- LoRA Download --
+
+  def enter_lora_download_mode
+    @overlay = :lora_download; @lora_download_view = :recommended
+    @error_message = nil; @fetching = false
+    @lora_search_input.value = "lora safetensors"
+    @lora_search_input.blur
+    @lora_search_focused = false
+    build_lora_recommended_list
+    [self, nil]
+  end
+
+  def build_lora_recommended_list
+    items = RECOMMENDED_LORAS.map do |l|
+      already = File.exist?(File.join(@lora_dir, l[:file]))
+      status = already ? " (installed)" : ""
+      { title: "#{l[:name]}#{status}", description: "#{l[:compat]} | #{format_bytes(l[:size])} — #{l[:desc]}" }
+    end
+    items << { title: "Browse HuggingFace...", description: "Search HuggingFace for LoRAs" }
+    items << { title: "Browse CivitAI...", description: "Search CivitAI for community LoRAs" }
+    @lora_recommended_list = Bubbles::List.new(items, width: @width - 12, height: [@height - 10, 6].max)
+    @lora_recommended_list.show_title = false
+    @lora_recommended_list.show_status_bar = false
+    @lora_recommended_list.selected_item_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    @lora_recommended_list.item_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+  end
+
+  def exit_lora_download_mode
+    @overlay = :lora; @lora_download_view = :recommended; @fetching = false
+    @lora_repo_list = nil; @lora_file_list = nil; @lora_recommended_list = nil
+    @lora_remote_repos = []; @lora_remote_files = []; @lora_selected_repo_id = nil; @error_message = nil
+    @lora_search_input.blur; @lora_search_focused = false
+    scan_loras
+    [self, nil]
+  end
+
+  def enter_lora_hf_search_mode
+    @lora_download_view = :repos
+    @lora_download_source = :huggingface
+    @error_message = nil; @fetching = true
+    @lora_search_input.value = "lora safetensors"
+    @lora_search_input.placeholder = "Search HuggingFace LoRAs..."
+    @lora_search_input.focus
+    @lora_search_focused = true
+    [self, fetch_lora_repos_cmd("lora safetensors")]
+  end
+
+  def fetch_lora_repos_cmd(query = "lora safetensors")
+    search = URI.encode_www_form_component(query)
+    Proc.new do
+      uri = URI.parse("#{HF_API_BASE}/models?search=#{search}&sort=downloads&direction=-1&limit=50")
+      all_repos = JSON.parse(hf_get(uri).body)
+      # Filter to repos that likely contain LoRA files
+      repos = all_repos.select { |r|
+        id = (r["id"] || "").downcase
+        tags = (r["tags"] || []).map(&:downcase)
+        id.include?("lora") || tags.include?("lora")
+      }.first(25)
+      LoraReposFetchedMessage.new(repos: repos)
+    rescue => e
+      LoraReposFetchErrorMessage.new(error: e.message)
+    end
+  end
+
+  def handle_lora_repos_fetched(message)
+    @fetching = false; @lora_remote_repos = message.repos
+    @lora_search_input.blur
+    @lora_search_focused = false
+    if @lora_download_source == :civitai
+      @lora_civitai_models = message.repos
+      items = message.repos.map do |m|
+        base = m[:base_model] ? " | #{m[:base_model]}" : ""
+        rating = m[:rating] ? " | #{m[:rating]}*" : ""
+        { title: m[:name], description: "#{format_number(m[:downloads])} downloads#{base}#{rating}" }
+      end
+    else
+      items = @lora_remote_repos.map do |r|
+        { title: r["id"], description: "#{format_number(r["downloads"] || 0)} downloads" }
+      end
+    end
+    items = [{ title: "No LoRAs found", description: "Try a different search" }] if items.empty?
+    @lora_repo_list = Bubbles::List.new(items, width: @width - 4, height: @height - 9)
+    @lora_repo_list.title = ""
+    @lora_repo_list.show_status_bar = false
+    @lora_repo_list.selected_item_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    @lora_repo_list.item_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    [self, nil]
+  end
+
+  def fetch_lora_files_cmd(repo_id)
+    @fetching = true; @lora_selected_repo_id = repo_id
+    Proc.new do
+      uri = URI.parse("#{HF_API_BASE}/models/#{repo_id}/tree/main")
+      all = JSON.parse(hf_get(uri).body)
+      lora_files = all.select { |f|
+        next false unless f["type"] == "file"
+        f["path"].end_with?(".safetensors")
+      }
+      LoraFilesFetchedMessage.new(files: lora_files, repo_id: repo_id)
+    rescue => e
+      LoraFilesFetchErrorMessage.new(error: e.message)
+    end
+  end
+
+  def handle_lora_files_fetched(message)
+    @fetching = false; @lora_download_view = :files; @lora_remote_files = message.files
+    items = @lora_remote_files.map { |f| { title: f["path"], description: f["size"] ? format_bytes(f["size"]) : "unknown" } }
+    items = [{ title: "No .safetensors files found", description: "" }] if items.empty?
+    @lora_file_list = Bubbles::List.new(items, width: @width - 4, height: @height - 9)
+    @lora_file_list.title = ""
+    @lora_file_list.show_status_bar = false
+    @lora_file_list.selected_item_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    @lora_file_list.item_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    [self, nil]
+  end
+
+  def start_lora_download(repo_id, filename, size)
+    FileUtils.mkdir_p(@lora_dir)
+    dest = File.join(@lora_dir, File.basename(filename)); part = "#{dest}.part"
+    @lora_downloading = true; @lora_download_dest = part
+    @lora_download_total = size || 0; @lora_download_filename = File.basename(filename); @error_message = nil
+    url = "#{HF_DOWNLOAD_BASE}/#{repo_id}/resolve/main/#{URI.encode_www_form_component(filename)}"
+    Proc.new do
+      _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",
+        "-C", "-", "--retry", "5", "--retry-delay", "3", "--retry-all-errors",
+        "--connect-timeout", "30", url)
+      if st.success?
+        File.rename(part, dest)
+        LoraDownloadDoneMessage.new(path: dest, filename: File.basename(filename))
+      else
+        LoraDownloadErrorMessage.new(error: "Download failed (exit #{st.exitstatus}). Try again to resume.")
+      end
+    rescue Errno::ENOENT
+      File.delete(part) if File.exist?(part)
+      LoraDownloadErrorMessage.new(error: "curl not found")
+    rescue => e
+      File.delete(part) rescue nil
+      LoraDownloadErrorMessage.new(error: e.message)
+    end
+  end
+
+  def show_lora_civitai_files(model)
+    @lora_download_view = :files
+    @lora_selected_repo_id = model[:name]
+    @lora_civitai_selected_files = model[:files]
+    items = model[:files].map do |f|
+      { title: f[:name], description: f[:size] ? format_bytes(f[:size]) : "unknown" }
+    end
+    items = [{ title: "No compatible files", description: "" }] if items.empty?
+    @lora_file_list = Bubbles::List.new(items, width: @width - 4, height: @height - 9)
+    @lora_file_list.title = ""
+    @lora_file_list.show_status_bar = false
+    @lora_file_list.selected_item_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    @lora_file_list.item_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    [self, nil]
+  end
+
+  def start_lora_civitai_download(filename, url, size)
+    FileUtils.mkdir_p(@lora_dir)
+    dest = File.join(@lora_dir, filename); part = "#{dest}.part"
+    @lora_downloading = true; @lora_download_dest = part
+    @lora_download_total = size || 0; @lora_download_filename = filename; @error_message = nil
+    Proc.new do
+      _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",
+        "-C", "-", "--retry", "5", "--retry-delay", "3", "--retry-all-errors",
+        "--connect-timeout", "30", url)
+      if st.success?
+        File.rename(part, dest)
+        LoraDownloadDoneMessage.new(path: dest, filename: filename)
+      else
+        LoraDownloadErrorMessage.new(error: "Download failed (exit #{st.exitstatus}). Try again to resume.")
+      end
+    rescue Errno::ENOENT
+      File.delete(part) if File.exist?(part)
+      LoraDownloadErrorMessage.new(error: "curl not found")
+    rescue => e
+      File.delete(part) rescue nil
+      LoraDownloadErrorMessage.new(error: e.message)
+    end
+  end
+
+  def handle_lora_download_done(message)
+    @lora_downloading = false; @lora_download_dest = nil; @lora_download_filename = ""
+    @error_message = nil
+    scan_loras
+    @overlay = :lora
+    [self, set_status_toast("Downloaded #{message.filename}")]
+  end
+
+  def handle_lora_download_key(message)
+    key = message.to_s
+    case key
+    when "esc"
+      return [self, nil] if @lora_downloading
+      if @lora_search_focused
+        @lora_search_input.blur
+        @lora_search_focused = false
+        return [self, nil]
+      end
+      return lora_back_to_repos if @lora_download_view == :files
+      return lora_back_to_recommended if @lora_download_view == :repos
+      return exit_lora_download_mode
+    when "q"
+      return [self, nil] if @lora_downloading || @lora_search_focused
+      return lora_back_to_repos if @lora_download_view == :files
+      return lora_back_to_recommended if @lora_download_view == :repos
+      return exit_lora_download_mode
+    when "tab"
+      if @lora_download_view == :repos
+        @lora_search_focused = !@lora_search_focused
+        @lora_search_focused ? @lora_search_input.focus : @lora_search_input.blur
+        return [self, nil]
+      end
+    end
+    return [self, nil] if @fetching || @lora_downloading
+
+    if @lora_search_focused
+      return handle_lora_search_key(message)
+    end
+
+    case @lora_download_view
+    when :recommended then handle_lora_recommended_key(message)
+    when :repos then handle_lora_repo_list_key(message)
+    when :files then handle_lora_file_list_key(message)
+    else [self, nil]
+    end
+  end
+
+  def handle_lora_recommended_key(message)
+    return [self, nil] unless @lora_recommended_list
+    if message.to_s == "enter"
+      idx = @lora_recommended_list.selected_index rescue 0
+      if idx < RECOMMENDED_LORAS.length
+        l = RECOMMENDED_LORAS[idx]
+        dest = File.join(@lora_dir, l[:file])
+        if File.exist?(dest)
+          return [self, set_error_toast("#{l[:name]} is already installed")]
+        end
+        return [self, start_lora_download(l[:repo], l[:file], l[:size])]
+      elsif idx == RECOMMENDED_LORAS.length
+        return enter_lora_hf_search_mode
+      else
+        return enter_lora_civitai_search_mode
+      end
+    end
+    @lora_recommended_list, cmd = @lora_recommended_list.update(message)
+    [self, cmd]
+  end
+
+  def enter_lora_civitai_search_mode
+    @lora_download_view = :repos
+    @lora_download_source = :civitai
+    @error_message = nil; @fetching = false
+    @lora_search_input.value = ""
+    @lora_search_input.placeholder = "Search CivitAI LoRAs..."
+    @lora_search_input.focus
+    @lora_search_focused = true
+    @lora_repo_list = nil
+    [self, nil]
+  end
+
+  def handle_lora_search_key(message)
+    key = message.to_s
+    if key == "enter"
+      query = @lora_search_input.value.strip
+      if @lora_download_source == :civitai
+        @fetching = true
+        @lora_search_input.blur
+        @lora_search_focused = false
+        return [self, fetch_civitai_models_cmd(query, type: "LORA")]
+      else
+        return [self, nil] if query.empty?
+        @fetching = true
+        @lora_search_input.blur
+        @lora_search_focused = false
+        return [self, fetch_lora_repos_cmd(query)]
+      end
+    end
+    @lora_search_input, cmd = @lora_search_input.update(message)
+    [self, cmd]
+  end
+
+  def handle_lora_repo_list_key(message)
+    return [self, nil] unless @lora_repo_list
+    if message.to_s == "enter"
+      idx = @lora_repo_list.selected_index rescue 0
+      if @lora_download_source == :civitai
+        return [self, nil] if idx >= @lora_civitai_models.length
+        m = @lora_civitai_models[idx]
+        return show_lora_civitai_files(m)
+      else
+        item = @lora_repo_list.selected_item
+        return [self, fetch_lora_files_cmd(item[:title])] if item && item[:title] != "No LoRAs found"
+        return [self, nil]
+      end
+    end
+    @lora_repo_list, cmd = @lora_repo_list.update(message)
+    [self, cmd]
+  end
+
+  def handle_lora_file_list_key(message)
+    return [self, nil] unless @lora_file_list
+    if message.to_s == "enter"
+      idx = @lora_file_list.selected_index rescue 0
+      if @lora_download_source == :civitai
+        return [self, nil] if idx >= (@lora_civitai_selected_files || []).length
+        f = @lora_civitai_selected_files[idx]
+        return [self, start_lora_civitai_download(f[:name], f[:url], f[:size])]
+      end
+      item = @lora_file_list.selected_item
+      if item && item[:title] != "No .safetensors files found"
+        fd = @lora_remote_files.find { |f| f["path"] == item[:title] }
+        return [self, start_lora_download(@lora_selected_repo_id, item[:title], fd&.dig("size") || 0)]
+      end
+      return [self, nil]
+    end
+    @lora_file_list, cmd = @lora_file_list.update(message)
+    [self, cmd]
+  end
+
+  def lora_back_to_recommended
+    @lora_download_view = :recommended; @lora_file_list = nil; @lora_repo_list = nil
+    @lora_remote_files = []; @lora_remote_repos = []; @lora_selected_repo_id = nil; @error_message = nil
+    @lora_search_input.blur; @lora_search_focused = false
+    build_lora_recommended_list
+    [self, nil]
+  end
+
+  def lora_back_to_repos
+    @lora_download_view = :repos; @lora_file_list = nil; @lora_remote_files = []
+    @lora_selected_repo_id = nil; @error_message = nil
+    @lora_search_focused = false; @lora_search_input.blur
+    [self, nil]
   end
 
   # -- Preset keys --
@@ -3680,17 +4368,19 @@ class Chewy
         case @file_picker_target
         when :controlnet
           @controlnet_image_path = entry[:path]
-          @status_message = "ControlNet image: #{File.basename(entry[:path])}"
-          return close_overlay
+          toast = set_status_toast("ControlNet image: #{File.basename(entry[:path])}")
+          close_overlay
+          return [self, toast]
         when :cn_model
           @controlnet_model_path = entry[:path]
-          @status_message = "ControlNet model: #{File.basename(entry[:path])}"
-          return close_overlay
+          toast = set_status_toast("ControlNet model: #{File.basename(entry[:path])}")
+          close_overlay
+          return [self, toast]
         else
           @init_image_path = entry[:path]
-          @status_message = "Init image: #{File.basename(entry[:path])}"
+          toast = set_status_toast("Init image: #{File.basename(entry[:path])}")
           close_overlay
-          return offer_img2img_settings
+          return offer_img2img_settings(toast)
         end
       end
     when "backspace"
@@ -4004,17 +4694,71 @@ class Chewy
     false
   end
 
+  # Apply anti-aliased rounded corners to a ChunkyPNG image.
+  # radius_pct is the corner radius as a percentage of the shorter dimension (0.0-0.5).
+  def apply_rounded_corners!(image, radius_pct: 0.04)
+    w = image.width; h = image.height
+    r = ([w, h].min * radius_pct).round.to_f
+    return if r < 2
+
+    ri = r.to_i + 1
+    ri.times do |dy|
+      ri.times do |dx|
+        # Distance from pixel center to corner circle center
+        cx = r - dx - 0.5
+        cy = r - dy - 0.5
+        dist = Math.sqrt(cx * cx + cy * cy)
+        next if dist <= r - 1.0  # fully inside the curve
+
+        # Anti-alias: blend alpha over a 1px transition band
+        alpha = if dist >= r
+                  0  # fully outside
+                else
+                  ((r - dist) * 255).round.clamp(0, 255)
+                end
+
+        corners = [
+          [dx, dy],                   # top-left
+          [w - 1 - dx, dy],           # top-right
+          [dx, h - 1 - dy],           # bottom-left
+          [w - 1 - dx, h - 1 - dy],   # bottom-right
+        ]
+        corners.each do |px, py|
+          next if px < 0 || py < 0 || px >= w || py >= h
+          if alpha == 0
+            image[px, py] = ChunkyPNG::Color::TRANSPARENT
+          else
+            orig = image[px, py]
+            orig_a = ChunkyPNG::Color.a(orig)
+            new_a = (orig_a * alpha / 255).clamp(0, 255)
+            image[px, py] = ChunkyPNG::Color.rgba(
+              ChunkyPNG::Color.r(orig),
+              ChunkyPNG::Color.g(orig),
+              ChunkyPNG::Color.b(orig),
+              new_a
+            )
+          end
+        end
+      end
+    end
+  end
+
   def gradient_border_color
     colors = Theme.gradient(Theme.PRIMARY, Theme.ACCENT, 3)
     colors[1] # midpoint blend of primary and accent
   end
 
   # slot: stable ID for this image position (avoids flicker on re-render)
-  def render_image_kitty(path, max_w, max_h, slot: 1)
+  def render_image_kitty(path, max_w, max_h, slot: 1, rounded: true)
     return nil unless path && File.exist?(path) && File.size(path) > 0
 
     image = ChunkyPNG::Image.from_file(path)
-    png_data = File.binread(path)
+    if rounded
+      apply_rounded_corners!(image)
+      png_data = image.to_blob
+    else
+      png_data = File.binread(path)
+    end
     encoded = Base64.strict_encode64(png_data)
 
     # Compute cols/rows that fit within max_w × max_h while preserving aspect ratio.
@@ -4154,16 +4898,22 @@ class Chewy
     cell_ratio = 2.0
     img_cols = image.width.to_f
     img_rows = image.height.to_f / cell_ratio
-    scale = [req[:w] / img_cols, req[:h] / img_rows].min
-    fit_cols = (img_cols * scale).floor.clamp(1, req[:w])
-    fit_rows = (img_rows * scale).floor.clamp(1, req[:h])
+    max_h = req[:h]
+    max_w = req[:w]
+    scale = [max_w / img_cols, max_h / img_rows].min
+    fit_cols = (img_cols * scale).floor.clamp(1, max_w)
+    fit_rows = (img_rows * scale).floor.clamp(1, max_h)
 
     # Center the image within the target area
-    col = req[:col] + [(req[:w] - fit_cols) / 2, 0].max
-    row = req[:row]
+    col = req[:col] + [(max_w - fit_cols) / 2, 0].max
+    row = req[:row] + [(max_h - fit_rows) / 2, 0].max
+
+    # Apply rounded corners at the pixel level
+    apply_rounded_corners!(image)
+    png_data = image.to_blob
 
     slot = req[:slot]
-    encoded = Base64.strict_encode64(File.binread(path))
+    encoded = Base64.strict_encode64(png_data)
     chunks = encoded.scan(/.{1,4096}/)
 
     overlay = +""
@@ -4207,17 +4957,24 @@ class Chewy
       result += render_best_settings_popup
     end
 
+    # Clear stale kitty preview when generating or during reveal animation
+    if @kitty_graphics && (@generating || @reveal_phase)
+      result << "\e_Ga=d,d=I,i=20,q=2\e\\"
+    end
+
     # Register kitty overlay for main preview — must match render_image_preview dimensions
     if @kitty_graphics && !@generating && @last_output_path && File.exist?(@last_output_path) && @reveal_phase.nil?
       rw = right_panel_width
       prompt_h, negative_h, params_h = left_panel_heights
       total_left = prompt_h + negative_h + params_h
+      body_h = @height - 2
+      total_left = [total_left, body_h].min
       # These match render_right_panel: render_image_preview(rw - 2, total_left)
       img_w = rw - 2
-      img_h = total_left
+      img_h = [total_left - IMAGE_PAD_Y * 2, 1].max
       # Terminal position (1-based): outer padding (2 cols, 1 row) + left panel + right panel padding (1 col)
       img_col = 2 + left_panel_width + 1 + 1  # outer_pad_left + left_panel + right_panel_pad_left (1-based)
-      img_row = 1 + 1  # outer_pad_top + header
+      img_row = 1 + 1 + IMAGE_PAD_Y  # outer_pad_top + header + image_pad_top
       @kitty_overlay_pending = { path: @last_output_path, row: img_row, col: img_col, w: img_w, h: img_h, slot: 20 }
     end
 
@@ -4284,7 +5041,7 @@ class Chewy
     end
 
     left = "#{logo}#{model_info}#{img2img_badge}#{controlnet_badge}"
-    right = dim.render("[^y] provider  [^n] models ")
+    right = dim.render("[^y] provider  [^n] models  [^l] loras ")
 
     # Right-align the hint
     left_visible = left.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
@@ -4310,10 +5067,16 @@ class Chewy
     prompt_h = [(remaining * 0.6).to_i, 5].max
     negative_h = [remaining - prompt_h, 4].max
 
-    # Rebalance if we overshot
+    # Rebalance if we overshot — shrink sections to fit body_h
     total = prompt_h + negative_h + params_h
     if total > body_h
-      params_h = body_h - prompt_h - negative_h
+      overflow = total - body_h
+      # Shrink prompt first, then negative, then params
+      shrink = [overflow, prompt_h - 3].min
+      prompt_h -= shrink; overflow -= shrink
+      shrink = [overflow, negative_h - 2].min
+      negative_h -= shrink; overflow -= shrink
+      params_h -= overflow if overflow > 0
     end
 
     [prompt_h, negative_h, params_h]
@@ -4330,22 +5093,27 @@ class Chewy
     Lipgloss.join_vertical(:left, prompt_section, negative_section, params_section)
   end
 
+  IMAGE_PAD_Y = 2  # vertical padding above/below image in right panel
+
   def render_right_panel
     rw = right_panel_width
     prompt_h, negative_h, params_h = left_panel_heights
     total_left = prompt_h + negative_h + params_h
+    body_h = @height - 2  # header + bottom bar
+    total_left = [total_left, body_h].min
+    img_h = [total_left - IMAGE_PAD_Y * 2, 1].max
 
     content = if @generating
-      render_generating_preview(rw - 2, total_left)
+      render_generating_preview(rw - 2, img_h)
     elsif @last_output_path && File.exist?(@last_output_path)
-      render_image_preview(rw - 2, total_left)
+      render_image_preview(rw - 2, img_h)
     else
-      render_empty_preview(rw - 2, total_left)
+      render_empty_preview(rw - 2, img_h)
     end
 
     Lipgloss::Style.new
       .background(Theme.SURFACE)
-      .width(rw - 2).height(total_left).padding(0, 1).render(content)
+      .width(rw - 2).height(total_left).padding(IMAGE_PAD_Y, 1).render(content)
   end
 
   def render_image_preview(max_w, max_h)
@@ -4412,7 +5180,6 @@ class Chewy
       status_lines << ""
       status_lines << center.call(bar)
       detail = [
-        Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true).render(pct_text),
         dim.render("#{@gen_step}/#{@gen_total_steps}"),
         dim.render(speed_str),
         dim.render(eta_str),
@@ -4432,11 +5199,12 @@ class Chewy
     end
 
     # Try to show live preview image
-    preview_img = load_gen_preview(max_w, max_h - status_lines.length - 1)
+    gap = 2
+    preview_img = load_gen_preview(max_w, max_h - status_lines.length - gap)
 
     if preview_img
       centered_img = center_image(preview_img, max_w)
-      (centered_img + "\n" + status_lines.join("\n"))
+      (centered_img + "\n" * gap + status_lines.join("\n"))
     else
       # No preview yet — center status vertically
       pad_top = [(max_h - status_lines.length) / 2, 0].max
@@ -4854,33 +5622,12 @@ class Chewy
     end
 
     if @status_message
-      left = @status_message
-      bg = Theme.PRIMARY; fg = Theme.BAR_TEXT
-    elsif @last_output_path && @last_generation_time
-      bg = if @reveal_phase && @reveal_phase < REVEAL_PHASES
-        progress = @reveal_phase.to_f / (REVEAL_PHASES - 1)
-        sweep_colors = Theme.gradient(Theme.SURFACE, Theme.PRIMARY, 10)
-        sweep_colors[(progress * 9).to_i]
-      else
-        Theme.PRIMARY
-      end
-      fg = if @reveal_phase && @reveal_phase < REVEAL_PHASES / 2
-        Theme.TEXT_DIM
-      else
-        Theme.BAR_TEXT
-      end
-      left = "output: #{File.basename(@last_output_path)} \u2502 #{@last_generation_time}s"
-      left += " \u2502 seed #{@last_seed}" if @last_seed
-    else
-      # No status — just show shortcuts on surface background
-      return Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE).render(right)
+      bar = Lipgloss::Style.new.background(Theme.PRIMARY).foreground(Theme.BAR_TEXT).width(@width).padding(0, 1)
+      return bar.render(@status_message)
     end
 
-    # Combine left info + right shortcuts in one bar
-    left_visible = left.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
-    gap = [@width - left_visible - right_visible - 4, 1].max
-    bar = Lipgloss::Style.new.background(bg).foreground(fg).width(@width).padding(0, 1)
-    bar.render("#{left}#{' ' * gap}#{right}")
+    # No toast — show shortcuts on surface background
+    Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE).render(right)
   end
 
   def context_keys
@@ -4897,9 +5644,10 @@ class Chewy
 
     keys << ["^x", "cancel"] if @generating
     keys << ["^e", "open"] if @last_output_path && !@generating
-    keys << ["^f", "fullscreen"] if @last_output_path && !@generating
-    keys += [["^y", "provider"], ["^d", "download"], ["^a", "gallery"], ["^b", "img picker"], ["^p", "preset"]]
-    keys << ["^q", "quit"]
+    keys << ["^w", "clear"] if @last_output_path && !@generating
+    keys << ["^a", "gallery"] unless @generating
+    keys << ["^p", "preset"] unless @generating
+    keys << ["F1", "help"]
     keys
   end
 
@@ -5051,8 +5799,9 @@ class Chewy
   end
 
   def render_download_view
+    source_label = @download_source == :civitai ? "CivitAI" : "HuggingFace"
     content = if @fetching
-      "#{@spinner.view} Searching HuggingFace..."
+      "#{@spinner.view} #{Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("Searching #{source_label}...")}"
     elsif @download_view == :recommended && @recommended_list
       @recommended_list.view
     elsif @download_view == :repos && @repo_list
@@ -5066,7 +5815,7 @@ class Chewy
     title = case @download_view
     when :recommended then "Recommended Models"
     when :files then "Files in #{@selected_repo_id}"
-    else "Download Models"
+    else "#{source_label} Models"
     end
     title_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
     dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
@@ -5128,6 +5877,81 @@ class Chewy
       .render(format_help_text(status_text, key_style, desc_style))
   end
 
+  def render_lora_download_view
+    source_label = @lora_download_source == :civitai ? "CivitAI" : "HuggingFace"
+    content = if @fetching
+      "#{@spinner.view} #{Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("Searching #{source_label}...")}"
+    elsif @lora_download_view == :recommended && @lora_recommended_list
+      @lora_recommended_list.view
+    elsif @lora_download_view == :repos && @lora_repo_list
+      @lora_repo_list.view
+    elsif @lora_download_view == :files && @lora_file_list
+      @lora_file_list.view
+    else
+      Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("Loading...")
+    end
+
+    title = case @lora_download_view
+    when :recommended then "Recommended LoRAs"
+    when :files then "Files in #{@lora_selected_repo_id}"
+    else "#{source_label} LoRAs"
+    end
+    title_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    separator = dim.render("\u2500" * (@width - 6))
+
+    search_bar = if @lora_download_view == :repos
+      border_color = @lora_search_focused ? Theme.BORDER_FOCUS : Theme.BORDER_DIM
+      search_label = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("Search: ")
+      Lipgloss::Style.new.border(:rounded).border_foreground(border_color).background(Theme.SURFACE)
+        .width(@width - 8).render("#{search_label}#{@lora_search_input.view}")
+    end
+
+    parts = [title_style.render(title), separator]
+    parts << search_bar if search_bar
+    parts << content
+    body_content = parts.join("\n")
+
+    body = Lipgloss::Style.new
+      .border(:rounded).border_foreground(Theme.PRIMARY).background(Theme.SURFACE)
+      .width(@width - 4).height(@height - 4).padding(0, 1).render(body_content)
+    status = render_lora_download_status_bar
+    Lipgloss.join_vertical(:left, body, status)
+  end
+
+  def render_lora_download_status_bar
+    if @lora_downloading
+      current = (File.size(@lora_download_dest) rescue 0)
+      pct = @lora_download_total > 0 ? (current.to_f / @lora_download_total) : 0
+      bar = @progress.view_as(pct.clamp(0.0, 1.0))
+      size_text = @lora_download_total > 0 ?
+        "#{format_bytes(current)} / #{format_bytes(@lora_download_total)}" :
+        format_bytes(current)
+      download_bar = Lipgloss::Style.new.background(Theme.SECONDARY).foreground(Theme.BAR_TEXT).width(@width).padding(0, 1)
+      return download_bar.render("#{@spinner.view} #{@lora_download_filename} #{bar} #{size_text}")
+    end
+
+    if @error_message
+      error_bar = Lipgloss::Style.new.background(Theme.ERROR).foreground(Theme.BAR_TEXT).width(@width).padding(0, 1)
+      return error_bar.render("! #{@error_message}")
+    end
+
+    status_text = if @lora_download_view == :recommended
+      "enter: download | esc: back"
+    elsif @lora_download_view == :files
+      "enter: download | esc: back"
+    elsif @lora_search_focused
+      "enter: search | esc: unfocus | tab: toggle"
+    else
+      "tab: search | enter: browse | esc: back"
+    end
+
+    key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
+    desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+    Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE)
+      .render(format_help_text(status_text, key_style, desc_style))
+  end
+
   def render_fullscreen_image
     return render_empty_preview(@width, @height) unless @fullscreen_image_path
 
@@ -5139,7 +5963,7 @@ class Chewy
 
     if @kitty_graphics
       # Kitty mode: raw escape sequence, no lipgloss wrapping
-      img = render_image_kitty(@fullscreen_image_path, img_w, img_h, slot: 10)
+      img = render_image_kitty(@fullscreen_image_path, img_w, img_h, slot: 10, rounded: false)
       if img
         "#{img}\n#{hint}"
       else
@@ -5317,7 +6141,7 @@ class Chewy
     if @editing_lora_weight
       "enter: confirm | esc: cancel"
     else
-      "space: toggle | +/-: weight | w: edit | esc: close"
+      "space: toggle | +/-: weight | w: edit | d: download | esc: close"
     end
   end
 
@@ -5354,7 +6178,8 @@ class Chewy
         name = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true).render(p[:name])
         "#{cursor}#{name}#{tag}\n    #{desc}"
       else
-        "  #{p[:name]}#{tag}\n    #{desc}"
+        name = Lipgloss::Style.new.foreground(Theme.TEXT).render(p[:name])
+        "  #{name}#{tag}\n    #{desc}"
       end
     end
 
@@ -5379,6 +6204,108 @@ class Chewy
     end
   end
 
+  # ========== Help Overlay ==========
+
+  HELP_SECTIONS = [
+    ["Generation", [
+      ["enter", "Generate image"],
+      ["^x", "Cancel generation"],
+      ["^w", "Clear prompt & image (new start)"],
+      ["^r", "Randomize seed"],
+    ]],
+    ["Navigation", [
+      ["tab", "Cycle focus (prompt / negative / params)"],
+      ["shift+tab", "Cycle focus backwards"],
+      ["up/down", "Prompt history (in prompt field)"],
+      ["j/k", "Navigate params (in params)"],
+      ["h/l", "Adjust param value (in params)"],
+    ]],
+    ["Overlays", [
+      ["^n", "Model picker"],
+      ["^d", "Download models"],
+      ["^l", "LoRA selector"],
+      ["^p", "Presets"],
+      ["^t", "Theme picker"],
+      ["^y", "Switch provider"],
+      ["^a", "Gallery"],
+    ]],
+    ["Image", [
+      ["^b", "Browse for init image (img2img)"],
+      ["^v", "Paste image from clipboard"],
+      ["^u", "Clear init image"],
+      ["^e", "Open last image in viewer"],
+      ["^f", "Fullscreen image preview"],
+    ]],
+    ["App", [
+      ["F1", "Toggle this help"],
+      ["^q", "Quit"],
+    ]],
+  ].freeze
+
+  def handle_help_key(message)
+    key = message.to_s
+    case key
+    when "esc", "q", "f1", "ctrl+]"
+      close_overlay
+    when "up", "k"
+      @help_scroll = [(@help_scroll || 0) - 1, 0].max
+      [self, nil]
+    when "down", "j"
+      @help_scroll = (@help_scroll || 0) + 1
+      [self, nil]
+    else
+      [self, nil]
+    end
+  end
+
+  def render_help_view
+    @help_scroll ||= 0
+    key_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+    section_style = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true)
+    dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+
+    lines = []
+    HELP_SECTIONS.each_with_index do |(section_name, keys), si|
+      lines << "" if si > 0
+      lines << section_style.render(section_name)
+      lines << dim.render("\u2500" * (section_name.length + 2))
+      keys.each do |k, d|
+        lines << "  #{key_style.render(k.ljust(12))} #{desc_style.render(d)}"
+      end
+    end
+
+    # Scrollable content
+    visible_h = @height - 6
+    max_scroll = [lines.length - visible_h, 0].max
+    @help_scroll = @help_scroll.clamp(0, max_scroll)
+    visible = lines[@help_scroll, visible_h] || []
+
+    scroll_hint = if max_scroll > 0
+      pos = @help_scroll > 0 ? "\u2191" : " "
+      pos += @help_scroll < max_scroll ? "\u2193" : " "
+      dim.render("  #{pos} scroll with j/k")
+    else
+      ""
+    end
+
+    title_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+    separator = dim.render("\u2500" * (@width - 6))
+    body_content = "#{title_style.render("Keyboard Shortcuts")}\n#{separator}\n#{visible.join("\n")}"
+
+    body = Lipgloss::Style.new
+      .border(:rounded).border_foreground(Theme.PRIMARY).background(Theme.SURFACE)
+      .width(@width - 4).height(@height - 4).padding(0, 1).render(body_content)
+
+    status_text = "j/k: scroll | esc: close#{scroll_hint}"
+    key_s = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
+    desc_s = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+    status = Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE)
+      .render(format_help_text(status_text, key_s, desc_s))
+
+    Lipgloss.join_vertical(:left, body, status)
+  end
+
   # ========== Theme Picker Overlay ==========
 
   def handle_theme_key(message)
@@ -5391,8 +6318,9 @@ class Chewy
     when "enter"
       # Confirm selection
       save_config
-      @status_message = "Theme: #{Theme.current_name}"
-      return close_overlay
+      toast = set_status_toast("Theme: #{Theme.current_name}")
+      close_overlay
+      return [self, toast]
     when "up", "k"
       @theme_index = (@theme_index - 1) % THEME_NAMES.length
       Theme.set(THEME_NAMES[@theme_index])
@@ -5486,8 +6414,9 @@ class Chewy
       end
       update_param_keys
       save_config
-      @status_message = "Provider: #{@provider.display_name}"
-      return close_overlay
+      toast = set_status_toast("Provider: #{@provider.display_name}")
+      close_overlay
+      return [self, toast]
     end
     [self, nil]
   end
@@ -5556,25 +6485,24 @@ class Chewy
       clip = `pbpaste 2>/dev/null`.strip rescue ""
       unless clip.empty?
         @api_key_input.value = clip
-        @status_message = "Pasted from clipboard"
+        return [self, set_status_toast("Pasted from clipboard")]
       end
       return [self, nil]
     when "enter"
       api_key = @api_key_input.value.strip
       if api_key.empty?
-        @error_message = "API key cannot be empty"
-        return [self, nil]
+        return [self, set_error_toast("API key cannot be empty")]
       end
       @provider.store_api_key(api_key)
       @api_key_input.value = ""
       @overlay = nil
       @error_message = nil
-      @status_message = "#{@provider.display_name} API key saved"
+      toast = set_status_toast("#{@provider.display_name} API key saved")
       case @focus
       when FOCUS_PROMPT then @prompt_input.focus
       when FOCUS_NEGATIVE then @negative_input.focus
       end
-      return [self, nil]
+      return [self, toast]
     end
     @api_key_input, cmd = @api_key_input.update(message)
     [self, cmd]
@@ -5621,22 +6549,21 @@ class Chewy
     when "enter"
       token = @hf_token_input.value.strip
       if token.empty?
-        @error_message = "Token cannot be empty"
-        return [self, nil]
+        return [self, set_error_toast("Token cannot be empty")]
       end
       save_hf_token(token)
       @hf_token_input.value = ""
       pending = @hf_token_pending_action
       @hf_token_pending_action = nil
       @overlay = nil
-      @status_message = "Token saved"
+      toast = set_status_toast("Token saved")
       case @focus
       when FOCUS_PROMPT then @prompt_input.focus
       when FOCUS_NEGATIVE then @negative_input.focus
       end
       # Resume the action that triggered the token prompt
       return download_flux_companions if pending == :flux_companions
-      return [self, nil]
+      return [self, toast]
     end
     @hf_token_input, cmd = @hf_token_input.update(message)
     [self, cmd]
@@ -5754,9 +6681,27 @@ CHEWY_LOGO = <<~'ART'
               ▀     ▀▀▀▀
 ART
 
+def cli_fg(hex)
+  hex = hex.sub("#", "")
+  "\e[38;2;#{hex[0,2].to_i(16)};#{hex[2,2].to_i(16)};#{hex[4,2].to_i(16)}m"
+end
+
+def cli_bold_fg(hex) = "\e[1m#{cli_fg(hex)}"
+
+def cli_load_theme
+  return if @cli_theme_loaded
+  @cli_theme_loaded = true
+  config = File.exist?(CONFIG_PATH) ? (YAML.safe_load(File.read(CONFIG_PATH)) || {}) : {}
+  Theme.set(config["theme"] || "midnight")
+rescue
+  nil
+end
+
 def print_logo
+  cli_load_theme
+  c = cli_bold_fg(Theme.PRIMARY)
   CHEWY_LOGO.each_line do |line|
-    puts "\e[1;35m#{line}\e[0m"
+    puts "#{c}#{line}\e[0m"
   end
 end
 
@@ -5792,6 +6737,7 @@ def cli_output_dir
 end
 
 def cli_list_images
+  cli_load_theme
   dir = cli_output_dir
   unless File.directory?(dir)
     puts "No output directory found at #{dir}"
@@ -5804,7 +6750,10 @@ def cli_list_images
     exit 0
   end
 
-  puts "\e[1;35mImages in #{dir}\e[0m (#{pngs.length} total)\n\n"
+  primary = cli_bold_fg(Theme.PRIMARY)
+  accent = cli_fg(Theme.ACCENT)
+  dim = cli_fg(Theme.TEXT_DIM)
+  puts "#{primary}Images in #{dir}\e[0m (#{pngs.length} total)\n\n"
   pngs.each_with_index do |png, i|
     json = png.sub(/\.png$/, ".json")
     meta = File.exist?(json) ? (JSON.parse(File.read(json)) rescue {}) : {}
@@ -5812,23 +6761,24 @@ def cli_list_images
     model = meta["model"] ? File.basename(meta["model"]) : nil
     seed = meta["seed"]
 
-    idx = "\e[1;35m#{i + 1}.\e[0m"
+    idx = "#{primary}#{i + 1}.\e[0m"
     name = "\e[1m#{File.basename(png)}\e[0m"
     details = [model, seed ? "seed:#{seed}" : nil].compact.join(" | ")
     puts "  #{idx} #{name}"
     puts "     #{prompt}" unless prompt.empty?
-    puts "     \e[2m#{details}\e[0m" unless details.empty?
+    puts "     #{dim}#{details}\e[0m" unless details.empty?
     puts ""
   end
 end
 
 def cli_delete_image(target)
+  cli_load_theme
   dir = cli_output_dir
   # Allow bare filename or full path
   path = File.exist?(target) ? target : File.join(dir, target)
 
   unless File.exist?(path)
-    puts "\e[31mFile not found:\e[0m #{target}"
+    puts "#{cli_fg(Theme.ERROR)}File not found:\e[0m #{target}"
     exit 1
   end
 
@@ -5842,7 +6792,7 @@ def cli_delete_image(target)
 
   File.delete(path) if File.exist?(path)
   File.delete(json) if File.exist?(json)
-  puts "\e[32mDeleted\e[0m #{File.basename(path)}"
+  puts "#{cli_fg(Theme.SUCCESS)}Deleted\e[0m #{File.basename(path)}"
 end
 
 case ARGV[0]
@@ -5859,7 +6809,7 @@ when "delete", "rm"
   exit 0
 when "--help", "-h", "help"
   print_logo
-  puts "\e[1;35mchewy v#{CHEWY_VERSION}\e[0m — local AI image generation TUI\n\n"
+  puts "#{cli_bold_fg(Theme.PRIMARY)}chewy v#{CHEWY_VERSION}\e[0m — local AI image generation TUI\n\n"
   puts "Usage: chewy [command]\n\n"
   puts "Commands:"
   puts "  (none)          Launch the TUI"
@@ -5873,7 +6823,7 @@ end
 
 if (new_version = check_for_updates)
   print_logo
-  puts "\e[1;35mchewy v#{CHEWY_VERSION}\e[0m -> \e[1;32mv#{new_version}\e[0m available!"
+  puts "#{cli_bold_fg(Theme.PRIMARY)}chewy v#{CHEWY_VERSION}\e[0m -> #{cli_bold_fg(Theme.SUCCESS)}v#{new_version}\e[0m available!"
   puts ""
   puts "  brew upgrade Holy-Coders/chewy/chewy"
   puts ""
