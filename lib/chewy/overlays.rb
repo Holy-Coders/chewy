@@ -233,20 +233,63 @@ class Chewy
       @gallery_thumb_cache = {}
     end
 
+    GALLERY_DEBOUNCE = 0.15
+
+    def gallery_debounce_preview
+      @gallery_preview_ready = false
+      @gallery_preview_gen += 1
+      clear_kitty_images if @kitty_graphics
+      gen = @gallery_preview_gen
+      Bubbletea.tick(GALLERY_DEBOUNCE) { GalleryPreviewMessage.new(generation: gen) }
+    end
+
+    def gallery_load_thumb_async
+      return [self, nil] if @gallery_images.empty?
+      entry = @gallery_images[@gallery_index]
+      return [self, nil] unless entry && entry[:path]
+
+      if @gallery_thumb_cache[entry[:path]]
+        @gallery_preview_ready = true
+        return [self, nil]
+      end
+
+      path = entry[:path]
+      gen = @gallery_preview_gen
+      inner_h = @height - 6
+      list_w = narrow? ? @width - 4 : [(@width * 0.35).to_i, 30].max
+      preview_w = @width - list_w - 8
+      info_h = 8
+      thumb_h = [inner_h - info_h - 2, 6].max
+      max_w = preview_w - 4
+
+      cmd = Proc.new do
+        thumb = render_image_halfblocks(path, max_w, thumb_h)
+        GalleryPreviewMessage.new(generation: gen, path: path, thumb: thumb)
+      rescue
+        GalleryPreviewMessage.new(generation: gen, path: path, thumb: nil)
+      end
+      [self, cmd]
+    end
+
     def handle_gallery_key(message)
       key = message.to_s
       return close_overlay if key == "esc" || key == "q"
       return [self, nil] if @gallery_images.empty?
 
+      nav_cmd = nil
       case key
       when "up", "k"
         @gallery_index = (@gallery_index - 1) % @gallery_images.length
+        nav_cmd = gallery_debounce_preview
       when "down", "j"
         @gallery_index = (@gallery_index + 1) % @gallery_images.length
+        nav_cmd = gallery_debounce_preview
       when "left", "h"
         @gallery_index = (@gallery_index - 1) % @gallery_images.length
+        nav_cmd = gallery_debounce_preview
       when "right", "l"
         @gallery_index = (@gallery_index + 1) % @gallery_images.length
+        nav_cmd = gallery_debounce_preview
       when "enter", " "
         show_fullscreen_image(@gallery_images[@gallery_index][:path])
         return [self, nil]
@@ -259,7 +302,7 @@ class Chewy
         load_from_history(entry[:meta]) if entry[:meta] && !entry[:meta].empty?
         return close_overlay
       end
-      [self, nil]
+      [self, nav_cmd]
     end
 
     def delete_gallery_image
@@ -533,6 +576,44 @@ class Chewy
       @file_picker_thumb_cache = {}
     end
 
+    PICKER_DEBOUNCE = 0.15 # seconds to wait before loading preview
+
+    def file_picker_debounce_preview
+      @file_picker_preview_ready = false
+      @file_picker_preview_gen += 1
+      clear_kitty_images if @kitty_graphics
+      gen = @file_picker_preview_gen
+      Bubbletea.tick(PICKER_DEBOUNCE) { FilePickerPreviewMessage.new(generation: gen) }
+    end
+
+    def file_picker_load_thumb_async
+      entry = @file_picker_entries[@file_picker_index]
+      return [self, nil] unless entry && entry[:type] == :file && @file_picker_target != :cn_model
+
+      # Already cached — show immediately
+      if @file_picker_thumb_cache[entry[:path]]
+        @file_picker_preview_ready = true
+        return [self, nil]
+      end
+
+      # Load in background thread
+      path = entry[:path]
+      gen = @file_picker_preview_gen
+      inner_h = @height - 6
+      list_w = narrow? ? @width - 4 : [(@width * 0.45).to_i, 30].max
+      preview_w = @width - list_w - 8
+      max_w = preview_w - 4
+      max_h = inner_h - 4
+
+      cmd = Proc.new do
+        thumb = render_image_halfblocks(path, max_w, max_h)
+        FilePickerPreviewMessage.new(generation: gen, path: path, thumb: thumb)
+      rescue
+        FilePickerPreviewMessage.new(generation: gen, path: path, thumb: nil)
+      end
+      [self, cmd]
+    end
+
     def handle_file_picker_key(message)
       key = message.to_s
       return close_overlay if key == "esc" || key == "q"
@@ -588,7 +669,13 @@ class Chewy
         @file_picker_scroll = @file_picker_index - visible_h + 1
       end
 
-      [self, nil]
+      # Debounce preview for navigation keys
+      preview_cmd = case key
+      when "up", "k", "down", "j"
+        file_picker_debounce_preview
+      end
+
+      [self, preview_cmd]
     end
 
     HELP_SECTIONS = [

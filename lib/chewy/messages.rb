@@ -113,3 +113,13 @@ class ModelValidatedMessage < Bubbletea::Message
   attr_reader :path, :model_type, :error
   def initialize(path:, model_type: nil, error: nil) @path = path; @model_type = model_type; @error = error end
 end
+
+class FilePickerPreviewMessage < Bubbletea::Message
+  attr_reader :generation, :path, :thumb
+  def initialize(generation:, path: nil, thumb: nil) @generation = generation; @path = path; @thumb = thumb end
+end
+
+class GalleryPreviewMessage < Bubbletea::Message
+  attr_reader :generation, :path, :thumb
+  def initialize(generation:, path: nil, thumb: nil) @generation = generation; @path = path; @thumb = thumb end
+end

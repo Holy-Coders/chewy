@@ -291,6 +291,8 @@ class Chewy
     def clear_kitty_images
       # Delete all kitty images - used when switching views
       print "\e_Ga=d,d=A,q=2\e\\"
+      @_kitty_overlay_cache = nil
+      @_kitty_overlay_cache_key = nil
     end
 
     def render_image_kitty_inline(path, max_w, max_h)
@@ -359,16 +361,24 @@ class Chewy
 
     # Build a kitty overlay string: cursor-position + display image + restore cursor.
     # Appended to the view string AFTER lipgloss, so APC escapes don't affect layout.
+    # Caches the full overlay string by path+dimensions+position to avoid re-reading every frame.
     def build_kitty_overlay(req)
       path = req[:path]
       return "" unless path && File.exist?(path) && File.size(path) > 0
+
+      cache_key = [path, req[:w], req[:h], req[:slot], req[:row], req[:col]]
+
+      if @_kitty_overlay_cache_key == cache_key && @_kitty_overlay_cache
+        return @_kitty_overlay_cache
+      end
+
+      slot = req[:slot]
+      max_w = req[:w]; max_h = req[:h]
 
       image = ChunkyPNG::Image.from_file(path)
       cell_ratio = 2.0
       img_cols = image.width.to_f
       img_rows = image.height.to_f / cell_ratio
-      max_h = req[:h]
-      max_w = req[:w]
       scale = [max_w / img_cols, max_h / img_rows].min
       fit_cols = (img_cols * scale).floor.clamp(1, max_w)
       fit_rows = (img_rows * scale).floor.clamp(1, max_h)
@@ -377,11 +387,8 @@ class Chewy
       col = req[:col] + [(max_w - fit_cols) / 2, 0].max
       row = req[:row] + [(max_h - fit_rows) / 2, 0].max
 
-      # Apply rounded corners at the pixel level
       apply_rounded_corners!(image)
       png_data = image.to_blob
-
-      slot = req[:slot]
       encoded = Base64.strict_encode64(png_data)
       chunks = encoded.scan(/.{1,4096}/)
 
@@ -400,6 +407,9 @@ class Chewy
       end
 
       overlay << "\e[u"  # restore cursor
+
+      @_kitty_overlay_cache = overlay
+      @_kitty_overlay_cache_key = cache_key
       overlay
     rescue
       ""

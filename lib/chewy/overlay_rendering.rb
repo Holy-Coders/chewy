@@ -420,9 +420,21 @@ class Chewy
         info_h = info_lines.length + 1
         thumb_h = [inner_h - info_h - 2, 6].max
 
-        thumb = gallery_thumb(entry[:path], preview_w - 4, thumb_h)
-        thumb ||= dim.render("(no preview)")
-        preview_content = thumb + "\n" + info_lines.join("\n")
+        preview_content = if !@gallery_preview_ready
+          center_loading = Lipgloss::Style.new.width(preview_w - 4).align(:center)
+            .render(dim.render("Loading..."))
+          pad_top = [(thumb_h / 2), 0].max
+          (Array.new(pad_top, "") << center_loading).join("\n") + "\n\n" + info_lines.join("\n")
+        else
+          thumb = if @kitty_graphics
+            render_image(entry[:path], preview_w - 4, thumb_h, kitty_overlay: true)
+          else
+            @gallery_thumb_cache[entry[:path]]
+          end
+          thumb_str = thumb || dim.render("Loading...")
+          thumb_str + "\n\n" + info_lines.join("\n")
+        end
+
         preview_panel = Lipgloss::Style.new
           .border(:rounded).border_foreground(Theme.BORDER_DIM).background(Theme.SURFACE)
           .width(preview_w).height(inner_h).padding(0, 1)
@@ -430,8 +442,8 @@ class Chewy
 
         body = Lipgloss.join_horizontal(:top, list_panel, preview_panel)
 
-        # Register kitty overlay for gallery thumbnail
-        if @kitty_graphics && entry[:path] && File.exist?(entry[:path])
+        # Register kitty overlay for gallery thumbnail (only when preview is ready)
+        if @gallery_preview_ready && @kitty_graphics && entry[:path] && File.exist?(entry[:path])
           gallery_img_row = 1 + 1 + 1 + 1
           gallery_img_col = 2 + 1 + list_w + 1 + 1
           @kitty_overlay_pending = { path: entry[:path], row: gallery_img_row, col: gallery_img_col, w: preview_w - 4, h: thumb_h, slot: 21 }
@@ -914,15 +926,26 @@ class Chewy
       if narrow?
         body = list_panel
       else
-        # -- Right: preview --
+        # -- Right: preview (async — thumbnail loaded in background thread) --
         entry = @file_picker_entries[@file_picker_index]
-        preview_content = if entry && entry[:type] == :file && @file_picker_target != :cn_model
-          thumb = file_picker_thumb(entry[:path], preview_w - 4, inner_h - 4)
+        center_in_preview = ->(s) {
+          pad_top = [(inner_h - 4) / 2, 0].max
+          centered = Lipgloss::Style.new.width(preview_w - 4).align(:center).render(s)
+          (Array.new(pad_top, "") << centered).join("\n")
+        }
+        preview_content = if !@file_picker_preview_ready
+          center_in_preview.call(dim.render("Loading..."))
+        elsif entry && entry[:type] == :file && @file_picker_target != :cn_model
+          thumb = if @kitty_graphics
+            render_image(entry[:path], preview_w - 4, inner_h - 4, kitty_overlay: true)
+          else
+            @file_picker_thumb_cache[entry[:path]]
+          end
           if thumb
             info = dim.render(entry[:name])
             thumb + "\n" + info
           else
-            dim.render("(no preview)")
+            center_in_preview.call(dim.render("Loading..."))
           end
         elsif entry && entry[:type] == :file && @file_picker_target == :cn_model
           size_str = format_bytes(entry[:size] || 0)
@@ -940,8 +963,8 @@ class Chewy
 
         body = Lipgloss.join_horizontal(:top, list_panel, preview_panel)
 
-        # Register kitty overlay for file picker thumbnail
-        if @kitty_graphics && entry && entry[:type] == :file && @file_picker_target != :cn_model && File.exist?(entry[:path])
+        # Register kitty overlay for file picker thumbnail (only when preview is ready)
+        if @file_picker_preview_ready && @kitty_graphics && entry && entry[:type] == :file && @file_picker_target != :cn_model && File.exist?(entry[:path])
           picker_img_row = 1 + 1 + 1 + 1
           picker_img_col = 2 + 1 + list_w + 1 + 1
           @kitty_overlay_pending = { path: entry[:path], row: picker_img_row, col: picker_img_col, w: preview_w - 4, h: inner_h - 4, slot: 22 }

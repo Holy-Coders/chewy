@@ -155,11 +155,15 @@ class Chewy
     @file_picker_index = 0
     @file_picker_scroll = 0
     @file_picker_thumb_cache = {}
+    @file_picker_preview_gen = 0      # debounce generation counter
+    @file_picker_preview_ready = true # false while waiting for debounce tick
 
     # Gallery
     @gallery_images = []
     @gallery_index = 0
     @gallery_thumb_cache = {}
+    @gallery_preview_gen = 0
+    @gallery_preview_ready = true
 
     # Fullscreen image view
     @fullscreen_image_path = nil
@@ -359,6 +363,24 @@ class Chewy
       end
     when ModelValidatedMessage
       handle_model_validated(message)
+    when FilePickerPreviewMessage
+      return [self, nil] unless message.generation == @file_picker_preview_gen
+      if message.thumb
+        @file_picker_thumb_cache[message.path] = message.thumb if message.path
+        @file_picker_preview_ready = true
+        [self, nil]
+      else
+        file_picker_load_thumb_async
+      end
+    when GalleryPreviewMessage
+      return [self, nil] unless message.generation == @gallery_preview_gen
+      if message.thumb
+        @gallery_thumb_cache[message.path] = message.thumb if message.path
+        @gallery_preview_ready = true
+        [self, nil]
+      else
+        gallery_load_thumb_async
+      end
     when SplashTickMessage
       handle_splash_tick(message)
     when StatusDismissMessage
