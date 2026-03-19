@@ -944,9 +944,9 @@ class Chewy
     def context_keys
       keys = case @focus
       when FOCUS_PROMPT
-        [["enter", "generate"], ["tab", "focus"], ["^n", "models"]]
+        [["enter", "generate"], ["tab", "focus"], ["^n", "models"], ["\u2325e", "enhance"]]
       when FOCUS_NEGATIVE
-        [["enter", "generate"], ["tab", "focus"], ["^n", "models"]]
+        [["enter", "generate"], ["tab", "focus"], ["^n", "models"], ["\u2325n", "auto-neg"]]
       when FOCUS_PARAMS
         [["enter", "edit"], ["j/k", "nav"], ["tab", "focus"]]
       else

@@ -726,6 +726,11 @@ class Chewy
         ["p", "Open mask painter (click to paint)"],
         ["x", "Clear mask"],
       ]],
+      ["Prompt AI", [
+        ["alt+e", "Enhance prompt (add detail, quality tags)"],
+        ["alt+n", "Auto-generate negative prompt"],
+        ["alt+r", "Generate random creative prompt"],
+      ]],
       ["App", [
         ["F1", "Toggle this help"],
         ["^q", "Quit"],

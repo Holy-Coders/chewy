@@ -30,6 +30,7 @@ require_relative "chewy/downloads"
 require_relative "chewy/rendering"
 require_relative "chewy/overlay_rendering"
 require_relative "chewy/image_rendering"
+require_relative "chewy/prompt_enhance"
 require_relative "chewy/cli"
 
 class Chewy
@@ -44,6 +45,7 @@ class Chewy
   include Rendering
   include OverlayRendering
   include ImageRendering
+  include PromptEnhance
 
   def initialize
     @config = load_config
@@ -282,6 +284,9 @@ class Chewy
     @starter_pack_dest = nil
     @starter_pack_download_size = 0
 
+    # Prompt enhancement
+    @prompt_enhancing = false
+
     # Splash screen
     @splash = true
     @splash_phase = 0
@@ -375,6 +380,8 @@ class Chewy
       @starter_pack_completed += 1
       @starter_pack_errors << message.item_name
       return start_next_starter_pack_item
+    when PromptEnhanceMessage
+      handle_prompt_enhance_result(message)
     when ClipboardPasteMessage
       if message.error
         @error_message = message.error

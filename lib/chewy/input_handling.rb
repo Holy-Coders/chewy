@@ -249,6 +249,9 @@ class Chewy
       when "enter" then return start_generation
       when "up"    then history_prev; return [self, nil]
       when "down"  then history_next; return [self, nil]
+      when "alt+e" then return enhance_prompt
+      when "alt+n" then return generate_negative_prompt
+      when "alt+r" then return generate_random_prompt
       end
       @prompt_input, cmd = @prompt_input.update(message)
       [self, cmd]
@@ -257,6 +260,7 @@ class Chewy
     def handle_negative_key(message)
       key = message.to_s
       return start_generation if key == "enter"
+      return generate_negative_prompt if key == "alt+n"
       @negative_input, cmd = @negative_input.update(message)
       [self, cmd]
     end

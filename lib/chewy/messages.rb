@@ -133,3 +133,8 @@ class StarterPackItemErrorMessage < Bubbletea::Message
   attr_reader :item_name, :error
   def initialize(item_name:, error:) @item_name = item_name; @error = error end
 end
+
+class PromptEnhanceMessage < Bubbletea::Message
+  attr_reader :text, :target, :error
+  def initialize(text: nil, target:, error: nil) @text = text; @target = target; @error = error end
+end
