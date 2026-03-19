@@ -531,20 +531,63 @@ class Chewy
         end
       end
 
-      # Feather edges: blur the boundary between masked/unmasked by 2 pixels
-      feathered = mask.dup
-      2.times do
-        tmp = feathered.dup
-        (1...height - 1).each do |y|
-          (1...width - 1).each do |x|
-            neighbors = [tmp[x-1, y], tmp[x+1, y], tmp[x, y-1], tmp[x, y+1], tmp[x, y]]
-            avg = neighbors.sum { |p| ChunkyPNG::Color.r(p) } / neighbors.length
-            feathered[x, y] = ChunkyPNG::Color.rgb(avg, avg, avg)
+      # Feather edges with a box blur for smooth transitions (prevents hard seams)
+      # Use a larger radius for better blending at generation boundaries
+      radius = [width, height].min / 32  # ~16px for 512, ~32px for 1024
+      radius = radius.clamp(4, 40)
+
+      # Horizontal pass
+      blurred = mask.dup
+      height.times do |y|
+        running = 0
+        count = 0
+        # Initialize window
+        (0..[radius, width - 1].min).each do |x|
+          running += ChunkyPNG::Color.r(mask[x, y])
+          count += 1
+        end
+        width.times do |x|
+          blurred[x, y] = ChunkyPNG::Color.rgb(running / count, running / count, running / count)
+          # Expand right
+          rx = x + radius + 1
+          if rx < width
+            running += ChunkyPNG::Color.r(mask[rx, y])
+            count += 1
+          end
+          # Shrink left
+          lx = x - radius
+          if lx >= 0
+            running -= ChunkyPNG::Color.r(mask[lx, y])
+            count -= 1
           end
         end
       end
 
-      feathered.save(output_path)
+      # Vertical pass
+      result = blurred.dup
+      width.times do |x|
+        running = 0
+        count = 0
+        (0..[radius, height - 1].min).each do |y|
+          running += ChunkyPNG::Color.r(blurred[x, y])
+          count += 1
+        end
+        height.times do |y|
+          result[x, y] = ChunkyPNG::Color.rgb(running / count, running / count, running / count)
+          by = y + radius + 1
+          if by < height
+            running += ChunkyPNG::Color.r(blurred[x, by])
+            count += 1
+          end
+          ty = y - radius
+          if ty >= 0
+            running -= ChunkyPNG::Color.r(blurred[x, ty])
+            count -= 1
+          end
+        end
+      end
+
+      result.save(output_path)
       output_path
     end
   end

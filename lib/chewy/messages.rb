@@ -123,3 +123,13 @@ class GalleryPreviewMessage < Bubbletea::Message
   attr_reader :generation, :path, :thumb
   def initialize(generation:, path: nil, thumb: nil) @generation = generation; @path = path; @thumb = thumb end
 end
+
+class StarterPackItemDoneMessage < Bubbletea::Message
+  attr_reader :item_name
+  def initialize(item_name:) @item_name = item_name end
+end
+
+class StarterPackItemErrorMessage < Bubbletea::Message
+  attr_reader :item_name, :error
+  def initialize(item_name:, error:) @item_name = item_name; @error = error end
+end

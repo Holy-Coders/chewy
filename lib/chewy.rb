@@ -270,6 +270,17 @@ class Chewy
     @theme_index = THEME_NAMES.index(Theme.current_name) || 0
     @theme_original = Theme.current_name
 
+    # Starter pack
+    @starter_pack_index = 0
+    @starter_pack_downloading = false
+    @starter_pack_queue = []
+    @starter_pack_total = 0
+    @starter_pack_completed = 0
+    @starter_pack_errors = []
+    @starter_pack_current_file = ""
+    @starter_pack_dest = nil
+    @starter_pack_download_size = 0
+
     # Splash screen
     @splash = true
     @splash_phase = 0
@@ -356,6 +367,13 @@ class Chewy
       @companion_errors << "#{message.name}: #{message.error}"
       # Continue with next even if one failed
       return start_next_companion_download(@companion_queue || [], @companion_hf_token)
+    when StarterPackItemDoneMessage
+      @starter_pack_completed += 1
+      return start_next_starter_pack_item
+    when StarterPackItemErrorMessage
+      @starter_pack_completed += 1
+      @starter_pack_errors << message.item_name
+      return start_next_starter_pack_item
     when ClipboardPasteMessage
       if message.error
         @error_message = message.error
@@ -437,6 +455,7 @@ class Chewy
       when :fullscreen_image then render_fullscreen_image
       when :file_picker then render_file_picker_view
       when :mask_painter then render_mask_painter_view
+      when :starter_pack then render_starter_pack_view
       when :theme then render_overlay_panel("Theme", render_theme_content, render_theme_status)
       when :provider then render_overlay_panel("Provider", render_provider_content, render_provider_status)
       when :api_key then render_overlay_panel("API Key", render_api_key_content, render_api_key_status)

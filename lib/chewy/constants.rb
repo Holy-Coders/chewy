@@ -26,42 +26,42 @@ CONFIG_PATH = File.join(CONFIG_DIR, "config.yml")
 PRESETS_PATH = File.join(CONFIG_DIR, "presets.yml")
 
 BUILTIN_PRESETS = {
-  # --- txt2img (SD) ---
-  "Quick Draft" => { "steps" => 10, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "ays", "model_type" => "sd" },
-  "Balanced" => { "steps" => 20, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd" },
-  "High Quality" => { "steps" => 30, "cfg_scale" => 7.0, "width" => 768, "height" => 768, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sd" },
-  "Max Quality" => { "steps" => 50, "cfg_scale" => 7.5, "width" => 1024, "height" => 1024, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sdxl" },
+  # --- Generate from scratch ---
+  "Quick Draft" => { "desc" => "Fast preview — see your idea in seconds", "steps" => 10, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "ays", "model_type" => "sd" },
+  "Balanced" => { "desc" => "Good quality, reasonable speed", "steps" => 20, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd" },
+  "High Quality" => { "desc" => "Detailed output, larger canvas", "steps" => 30, "cfg_scale" => 7.0, "width" => 768, "height" => 768, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sd" },
+  "Max Quality" => { "desc" => "Best possible output (SDXL, slow)", "steps" => 50, "cfg_scale" => 7.5, "width" => 1024, "height" => 1024, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sdxl" },
   # --- Aspect ratios ---
-  "Portrait" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 512, "height" => 768, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd" },
-  "Landscape" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 768, "height" => 512, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd" },
-  "Widescreen (16:9)" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 896, "height" => 512, "sampler" => "dpm++2m", "scheduler" => "karras" },
-  "Square HD" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 1024, "height" => 1024, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sdxl" },
-  # --- img2img (SD/SDXL) ---
-  "Image Edit - Quick" => { "steps" => 20, "cfg_scale" => 7.0, "strength" => 0.5, "sampler" => "euler_a", "scheduler" => "karras" },
-  "Image Edit - High Quality" => { "steps" => 35, "cfg_scale" => 7.0, "strength" => 0.65, "sampler" => "dpm++2m", "scheduler" => "karras" },
-  "Image Edit - Creative" => { "steps" => 30, "cfg_scale" => 8.0, "strength" => 0.85, "sampler" => "euler_a", "scheduler" => "karras" },
-  "Image Edit - Subtle" => { "steps" => 25, "cfg_scale" => 7.0, "strength" => 0.3, "sampler" => "dpm++2m", "scheduler" => "karras" },
-  # --- ControlNet (SD 1.5) ---
-  "CN - Face Preserve" => { "steps" => 30, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "strength" => 0.4, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd", "cn_strength" => 0.85, "cn_canny" => true },
-  "CN - Restyle (keep structure)" => { "steps" => 30, "cfg_scale" => 7.5, "width" => 512, "height" => 512, "strength" => 0.65, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sd", "cn_strength" => 0.7, "cn_canny" => true },
-  "CN - Creative (loose guide)" => { "steps" => 35, "cfg_scale" => 8.0, "width" => 512, "height" => 512, "strength" => 0.8, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd", "cn_strength" => 0.5, "cn_canny" => true },
-  # --- img2img (FLUX) ---
-  "FLUX Edit - Face (safe)" => { "steps" => 40, "cfg_scale" => 1.0, "strength" => 0.35, "guidance" => 4.5, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
-  "FLUX Edit - Face (stronger)" => { "steps" => 40, "cfg_scale" => 1.0, "strength" => 0.45, "guidance" => 5.5, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
-  "FLUX Edit - Subtle" => { "steps" => 28, "cfg_scale" => 1.0, "strength" => 0.5, "guidance" => 5.0, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
-  "FLUX Edit - Balanced" => { "steps" => 28, "cfg_scale" => 1.0, "strength" => 0.75, "guidance" => 7.0, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
-  "FLUX Edit - Creative" => { "steps" => 35, "cfg_scale" => 1.0, "strength" => 0.9, "guidance" => 10.0, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
-  # --- Inpainting ---
-  "Inpaint - Face Preserve" => { "steps" => 30, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "strength" => 0.75, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd", "auto_mask" => "center_preserve" },
-  "Inpaint - Background Only" => { "steps" => 35, "cfg_scale" => 7.5, "width" => 512, "height" => 512, "strength" => 0.85, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sd", "auto_mask" => "center_preserve" },
-  # --- FLUX ---
-  "FLUX - Quick" => { "steps" => 4, "cfg_scale" => 1.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
-  "FLUX - Balanced" => { "steps" => 8, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
-  "FLUX - High Quality" => { "steps" => 20, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
+  "Portrait" => { "desc" => "Tall frame — people, characters, headshots", "steps" => 25, "cfg_scale" => 7.0, "width" => 512, "height" => 768, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd" },
+  "Landscape" => { "desc" => "Wide frame — scenery, environments", "steps" => 25, "cfg_scale" => 7.0, "width" => 768, "height" => 512, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd" },
+  "Widescreen (16:9)" => { "desc" => "Cinema format — wallpapers, banners", "steps" => 25, "cfg_scale" => 7.0, "width" => 896, "height" => 512, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  "Square HD" => { "desc" => "1024x1024 square (SDXL)", "steps" => 25, "cfg_scale" => 7.0, "width" => 1024, "height" => 1024, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sdxl" },
+  # --- Edit an image (SD/SDXL) ---
+  "Edit — Quick Touch-up" => { "desc" => "Fast light edits to an existing image", "steps" => 20, "cfg_scale" => 7.0, "strength" => 0.5, "sampler" => "euler_a", "scheduler" => "karras" },
+  "Edit — Refine Details" => { "desc" => "Higher quality edits, keeps most of the original", "steps" => 35, "cfg_scale" => 7.0, "strength" => 0.65, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  "Edit — Major Rework" => { "desc" => "Big changes — new style, heavy modifications", "steps" => 30, "cfg_scale" => 8.0, "strength" => 0.85, "sampler" => "euler_a", "scheduler" => "karras" },
+  "Edit — Subtle Tweak" => { "desc" => "Minimal change — color correction, small fixes", "steps" => 25, "cfg_scale" => 7.0, "strength" => 0.3, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  # --- ControlNet (face/structure preservation) ---
+  "Keep Face, Change Rest" => { "desc" => "ControlNet locks edges — change clothes, background, style", "steps" => 30, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "strength" => 0.4, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd", "cn_strength" => 0.85, "cn_canny" => true },
+  "Restyle (keep structure)" => { "desc" => "New art style but same composition and layout", "steps" => 30, "cfg_scale" => 7.5, "width" => 512, "height" => 512, "strength" => 0.65, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sd", "cn_strength" => 0.7, "cn_canny" => true },
+  "Creative Remix" => { "desc" => "Loose structural guide — big creative changes", "steps" => 35, "cfg_scale" => 8.0, "width" => 512, "height" => 512, "strength" => 0.8, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd", "cn_strength" => 0.5, "cn_canny" => true },
+  # --- FLUX editing ---
+  "FLUX — Keep Face (safe)" => { "desc" => "Minimal changes, face stays recognizable", "steps" => 40, "cfg_scale" => 1.0, "strength" => 0.35, "guidance" => 4.5, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
+  "FLUX — Keep Face (stronger)" => { "desc" => "More visible changes, face may shift slightly", "steps" => 40, "cfg_scale" => 1.0, "strength" => 0.45, "guidance" => 5.5, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
+  "FLUX — Light Edit" => { "desc" => "Subtle adjustments with FLUX quality", "steps" => 28, "cfg_scale" => 1.0, "strength" => 0.5, "guidance" => 5.0, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
+  "FLUX — Balanced Edit" => { "desc" => "Good mix of change and preservation", "steps" => 28, "cfg_scale" => 1.0, "strength" => 0.75, "guidance" => 7.0, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
+  "FLUX — Full Restyle" => { "desc" => "Major transformation — prompt drives everything", "steps" => 35, "cfg_scale" => 1.0, "strength" => 0.9, "guidance" => 10.0, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
+  # --- Inpainting (selective editing) ---
+  "Inpaint — Protect Face" => { "desc" => "Auto-masks center — change background/clothes, keep face", "steps" => 30, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "strength" => 0.75, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd", "auto_mask" => "center_preserve" },
+  "Inpaint — New Background" => { "desc" => "Replace everything around the subject", "steps" => 35, "cfg_scale" => 7.5, "width" => 512, "height" => 512, "strength" => 0.85, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sd", "auto_mask" => "center_preserve" },
+  # --- FLUX from scratch ---
+  "FLUX — Fast" => { "desc" => "Quick FLUX generation in 4 steps", "steps" => 4, "cfg_scale" => 1.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
+  "FLUX — Balanced" => { "desc" => "Good FLUX quality at 1024x1024", "steps" => 8, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
+  "FLUX — High Quality" => { "desc" => "Best FLUX output, more steps", "steps" => 20, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
   # --- Styles ---
-  "Photorealistic" => { "steps" => 35, "cfg_scale" => 5.0, "width" => 768, "height" => 768, "sampler" => "dpm++2m", "scheduler" => "karras" },
-  "Artistic / Painterly" => { "steps" => 30, "cfg_scale" => 10.0, "width" => 768, "height" => 768, "sampler" => "euler_a", "scheduler" => "karras" },
-  "Pixel Art" => { "steps" => 20, "cfg_scale" => 8.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "discrete" },
+  "Photorealistic" => { "desc" => "Lifelike photos — portraits, products, scenes", "steps" => 35, "cfg_scale" => 5.0, "width" => 768, "height" => 768, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  "Artistic / Painterly" => { "desc" => "Oil painting, watercolor, illustrated look", "steps" => 30, "cfg_scale" => 10.0, "width" => 768, "height" => 768, "sampler" => "euler_a", "scheduler" => "karras" },
+  "Pixel Art" => { "desc" => "Retro game-style pixel art", "steps" => 20, "cfg_scale" => 8.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "discrete" },
 }.freeze
 
 # ---------- Model Families ----------
@@ -169,6 +169,15 @@ PRELOADED_MODELS = [
     type: "SDXL",
     model_family: "SDXL",
     desc: "Fast SDXL variant — 1-4 steps, real-time generation",
+  },
+  {
+    name: "Realistic Vision v6 (Q8) — photorealistic",
+    repo: "second-state/Realistic_Vision_V6.0_B1-GGUF",
+    file: "realisticVisionV60B1_v51HyperVAE-Q8_0.gguf",
+    size: 1_765_000_000,
+    type: "SD 1.5",
+    model_family: "SD 1.x",
+    desc: "Best photorealistic SD 1.5 — great for face edits with ControlNet/inpainting",
   },
   {
     name: "DreamShaper v7 LCM (F16)",
@@ -296,6 +305,46 @@ RECOMMENDED_CONTROLNETS = [
     control_type: :openpose,
     desc: "Preserves body pose — restyle people while keeping their pose",
     use_canny: false,
+  },
+].freeze
+
+# Starter packs — curated download bundles for first-time users
+STARTER_PACKS = [
+  {
+    name: "Quick Start",
+    desc: "Just SD 1.5 — small, fast, great for learning",
+    items: [
+      { type: :model, repo: "second-state/stable-diffusion-v1-5-GGUF", file: "stable-diffusion-v1-5-pruned-emaonly-Q8_0.gguf", size: 1_640_000_000 },
+    ],
+  },
+  {
+    name: "Creative Studio",
+    desc: "SD 1.5 + DreamShaper + Detail Tweaker LoRA — versatile toolkit",
+    items: [
+      { type: :model, repo: "second-state/stable-diffusion-v1-5-GGUF", file: "stable-diffusion-v1-5-pruned-emaonly-Q8_0.gguf", size: 1_640_000_000 },
+      { type: :model, repo: "Steward/lcm-dreamshaper-v7-gguf", file: "LCM_Dreamshaper_v7-f16.gguf", size: 1_990_000_000 },
+      { type: :lora, repo: "jbilcke-hf/sd-lora-detail-tweaker", file: "detail_tweaker.safetensors", size: 36_000_000 },
+    ],
+  },
+  {
+    name: "Photorealistic + Face Editing",
+    desc: "Realistic Vision + ControlNet Canny — best for photo edits and inpainting",
+    items: [
+      { type: :model, repo: "second-state/Realistic_Vision_V6.0_B1-GGUF", file: "realisticVisionV60B1_v51HyperVAE-Q8_0.gguf", size: 1_765_000_000 },
+      { type: :controlnet, repo: "lllyasviel/ControlNet-v1-1", file: "control_v11p_sd15_canny.pth", size: 1_445_000_000 },
+    ],
+  },
+  {
+    name: "FLUX (state of the art)",
+    desc: "FLUX Schnell — best image quality, needs companion files (auto-downloaded on first use)",
+    items: [
+      { type: :model, repo: "second-state/FLUX.1-schnell-GGUF", file: "flux1-schnell-Q4_0.gguf", size: 6_876_948_608 },
+    ],
+  },
+  {
+    name: "Full Studio",
+    desc: "All of the above — SD 1.5, DreamShaper, Realistic Vision, FLUX, ControlNet, LoRAs",
+    items: :all,
   },
 ].freeze
 

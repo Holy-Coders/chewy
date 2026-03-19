@@ -94,6 +94,11 @@ class Chewy
     def dismiss_splash
       @splash = false
       @splash_phase = nil
+      if @first_run
+        @first_run_toast = false
+        @overlay = :starter_pack
+        return [self, nil]
+      end
       [self, nil]
     end
 

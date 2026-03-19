@@ -69,6 +69,7 @@ class Chewy
       when :fullscreen_image then handle_fullscreen_key(message)
       when :file_picker then handle_file_picker_key(message)
       when :mask_painter then handle_mask_painter_key(message)
+      when :starter_pack then handle_starter_pack_key(message)
       else [self, nil]
       end
     end
@@ -930,8 +931,37 @@ class Chewy
       [self, nil]
     end
 
+    # ========== Starter Pack ==========
+
+    def handle_starter_pack_key(message)
+      key = message.to_s
+      return [self, Bubbletea.quit] if key == "ctrl+c"
+
+      if @starter_pack_downloading
+        return [self, nil]
+      end
+
+      case key
+      when "esc", "q", "s"
+        @overlay = nil
+        case @focus
+        when FOCUS_PROMPT then @prompt_input.focus
+        when FOCUS_NEGATIVE then @negative_input.focus
+        end
+        return [self, nil]
+      when "up", "k"
+        @starter_pack_index = (@starter_pack_index - 1) % STARTER_PACKS.length
+      when "down", "j"
+        @starter_pack_index = (@starter_pack_index + 1) % STARTER_PACKS.length
+      when "enter"
+        return start_starter_pack_download(@starter_pack_index)
+      end
+      [self, nil]
+    end
+
     def handle_mask_painter_mouse(message)
-      return [self, nil] unless message.press?
+      # Accept both press and motion (drag) events for continuous painting
+      return [self, nil] unless message.press? || message.motion?
       # Map terminal coordinates to grid coordinates
       # Account for padding: 2 left, 1 top + 2 rows for title/status
       cx = message.x - 3
@@ -940,13 +970,20 @@ class Chewy
       return [self, nil] if cx < 0 || cy < 0
       return [self, nil] unless @mask_paint_grid
 
-      # Each grid cell is 1 char wide, 1 row tall in the display
       col = cx
       row = cy
 
       return [self, nil] if row >= @mask_paint_rows || col >= @mask_paint_cols
 
-      @mask_paint_grid[row][col] = (@mask_paint_brush == :paint)
+      # Paint with a 2-cell brush for easier coverage
+      value = (@mask_paint_brush == :paint)
+      (-1..1).each do |dy|
+        (-1..1).each do |dx|
+          r = row + dy; c = col + dx
+          next if r < 0 || r >= @mask_paint_rows || c < 0 || c >= @mask_paint_cols
+          @mask_paint_grid[r][c] = value
+        end
+      end
       [self, nil]
     end
   end

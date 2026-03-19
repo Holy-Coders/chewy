@@ -839,6 +839,109 @@ class Chewy
       end
     end
 
+    # ========== Starter Pack Downloads ==========
+
+    def start_starter_pack_download(index)
+      pack = STARTER_PACKS[index]
+      items = resolve_starter_pack_items(pack)
+      items = items.reject { |item| starter_pack_item_installed?(item) }
+
+      if items.empty?
+        return [self, set_status_toast("#{pack[:name]} — everything already installed!")]
+      end
+
+      @starter_pack_downloading = true
+      @starter_pack_queue = items
+      @starter_pack_total = items.length
+      @starter_pack_completed = 0
+      @starter_pack_errors = []
+
+      start_next_starter_pack_item
+    end
+
+    def resolve_starter_pack_items(pack)
+      return expand_all_starter_items if pack[:items] == :all
+      pack[:items]
+    end
+
+    def expand_all_starter_items
+      items = []
+      PRELOADED_MODELS.each { |m| items << { type: :model, repo: m[:repo], file: m[:file], size: m[:size] } }
+      RECOMMENDED_LORAS.each { |l| items << { type: :lora, repo: l[:repo], file: l[:file], size: l[:size] } }
+      RECOMMENDED_CONTROLNETS.each { |c| items << { type: :controlnet, repo: c[:repo], file: c[:file], size: c[:size] } }
+      items
+    end
+
+    def starter_pack_item_installed?(item)
+      dir = case item[:type]
+            when :model, :controlnet then @models_dir
+            when :lora then @lora_dir
+            end
+      File.exist?(File.join(dir, File.basename(item[:file])))
+    end
+
+    def start_next_starter_pack_item
+      if @starter_pack_queue.empty?
+        @starter_pack_downloading = false
+        @starter_pack_current_file = ""
+        @starter_pack_dest = nil
+        scan_models
+        scan_loras
+        # Auto-select first available model
+        @selected_model_path ||= @model_paths&.first
+        update_param_keys
+        @overlay = nil
+        case @focus
+        when FOCUS_PROMPT then @prompt_input.focus
+        when FOCUS_NEGATIVE then @negative_input.focus
+        end
+        if @starter_pack_errors.empty?
+          return [self, set_status_toast("Starter pack ready! You're all set to generate.")]
+        else
+          return [self, set_error_toast("Some downloads failed: #{@starter_pack_errors.join(', ')}")]
+        end
+      end
+
+      item = @starter_pack_queue.shift
+      dest_dir = case item[:type]
+                 when :model, :controlnet then @models_dir
+                 when :lora then @lora_dir
+                 end
+      FileUtils.mkdir_p(dest_dir)
+
+      filename = File.basename(item[:file])
+      dest = File.join(dest_dir, filename)
+      part = "#{dest}.part"
+
+      @starter_pack_current_file = filename
+      @starter_pack_dest = part
+      @starter_pack_download_size = item[:size] || 0
+
+      # For controlnet models with hf_path, use that for the URL
+      hf_file = item[:hf_path] || item[:file]
+      url = "#{HF_DOWNLOAD_BASE}/#{item[:repo]}/resolve/main/#{URI.encode_www_form_component(hf_file)}"
+
+      cmd = Proc.new do
+        _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",
+          "-C", "-", "--retry", "5", "--retry-delay", "3", "--retry-all-errors",
+          "--connect-timeout", "30", url)
+        if st.success?
+          File.rename(part, dest)
+          StarterPackItemDoneMessage.new(item_name: filename)
+        else
+          StarterPackItemErrorMessage.new(item_name: filename, error: "Download failed (exit #{st.exitstatus})")
+        end
+      rescue Errno::ENOENT
+        File.delete(part) if File.exist?(part)
+        StarterPackItemErrorMessage.new(item_name: filename, error: "curl not found")
+      rescue => e
+        File.delete(part) rescue nil
+        StarterPackItemErrorMessage.new(item_name: filename, error: e.message)
+      end
+
+      [self, cmd]
+    end
+
     def exit_cn_download
       was_downloading = @model_downloading
       @model_downloading = false

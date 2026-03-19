@@ -640,26 +640,33 @@ class Chewy
           Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" built-in") :
           Lipgloss::Style.new.foreground(Theme.SUCCESS).render(" custom")
 
-        desc_parts = []
+        # Friendly description from preset data, or fall back to technical details
+        friendly = d['desc']
+        tech_parts = []
         if d['model']
-          desc_parts << File.basename(d['model'], File.extname(d['model']))
+          tech_parts << File.basename(d['model'], File.extname(d['model']))
         elsif d['model_type']
-          desc_parts << d['model_type'].upcase
+          tech_parts << d['model_type'].upcase
         end
-        desc_parts << "#{d['steps']} steps" if d['steps']
-        desc_parts << d['sampler'] if d['sampler']
-        desc_parts << "#{d['width']}x#{d['height']}" if d['width'] && d['height']
-        desc_parts << "str:#{d['strength']}" if d['strength']
-        desc_parts << "cfg:#{d['cfg_scale']}" if d['cfg_scale']
-        desc = dim.render(desc_parts.join(" / "))
+        tech_parts << "#{d['steps']} steps" if d['steps']
+        tech_parts << "#{d['width']}x#{d['height']}" if d['width'] && d['height']
+        tech_parts << "str:#{d['strength']}" if d['strength']
+        tech = dim.render(tech_parts.join(" / "))
+
+        desc_line = friendly ? Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render(friendly) : ""
 
         if selected
           cursor = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true).render("> ")
           name = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true).render(p[:name])
-          "#{cursor}#{name}#{tag}\n    #{desc}"
+          result = "#{cursor}#{name}#{tag}"
+          result += "\n    #{desc_line}" if friendly
+          result += "\n    #{tech}" unless tech_parts.empty?
+          result
         else
           name = Lipgloss::Style.new.foreground(Theme.TEXT).render(p[:name])
-          "  #{name}#{tag}\n    #{desc}"
+          result = "  #{name}#{tag}"
+          result += "\n    #{desc_line}" if friendly
+          result
         end
       end
 
@@ -1068,6 +1075,68 @@ class Chewy
     end
 
     # ========== Mask Painter Overlay ==========
+
+    # ========== Starter Pack Overlay ==========
+
+    def render_starter_pack_view
+      title_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+      dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+      accent = Lipgloss::Style.new.foreground(Theme.ACCENT)
+      separator = dim.render("\u2500" * (@width - 6))
+
+      if @starter_pack_downloading
+        current_bytes = (File.size(@starter_pack_dest) rescue 0)
+        file_pct = @starter_pack_download_size > 0 ? (current_bytes.to_f / @starter_pack_download_size) : 0
+        bar = @progress.view_as(file_pct.clamp(0.0, 1.0))
+        size_text = @starter_pack_download_size > 0 ?
+          "#{format_bytes(current_bytes)} / #{format_bytes(@starter_pack_download_size)}" :
+          format_bytes(current_bytes)
+
+        content = [
+          "#{@spinner.view} #{accent.render("Downloading starter pack...")}",
+          "",
+          "#{dim.render("Item")} #{accent.render("#{@starter_pack_completed + 1}")} #{dim.render("of")} #{accent.render("#{@starter_pack_total}")}",
+          "#{Lipgloss::Style.new.foreground(Theme.TEXT).bold(true).render(@starter_pack_current_file)}",
+          "",
+          "#{bar} #{dim.render(size_text)}",
+        ].join("\n")
+      else
+        lines = STARTER_PACKS.each_with_index.map do |pack, i|
+          selected = i == @starter_pack_index
+          if selected
+            cursor = accent.render("> ")
+            name = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true).render(pack[:name])
+            desc = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render(pack[:desc])
+            "#{cursor}#{name}\n    #{desc}"
+          else
+            name = Lipgloss::Style.new.foreground(Theme.TEXT).render(pack[:name])
+            desc = dim.render(pack[:desc])
+            "  #{name}\n    #{desc}"
+          end
+        end
+        content = lines.join("\n\n")
+      end
+
+      welcome = Theme.gradient_text("Welcome to Chewy!", Theme.PRIMARY, Theme.ACCENT)
+      subtitle = dim.render("Pick a starter pack to download models and get started:")
+      body_content = "#{welcome}\n#{subtitle}\n#{separator}\n\n#{content}"
+
+      body = Lipgloss::Style.new
+        .border(:rounded).border_foreground(Theme.PRIMARY).background(Theme.SURFACE)
+        .width(@width - 4).height(@height - 4).padding(0, 1).render(body_content)
+
+      status_text = if @starter_pack_downloading
+        "downloading... please wait"
+      else
+        "enter: download pack | s/esc: skip (download later with ^d)"
+      end
+      key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
+      desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+      status = Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE)
+        .render(format_help_text(status_text, key_style, desc_style))
+
+      Lipgloss.join_vertical(:left, body, status)
+    end
 
     def render_mask_painter_view
       return "" unless @mask_paint_grid && @mask_paint_grid_colors

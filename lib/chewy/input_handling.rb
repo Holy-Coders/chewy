@@ -23,6 +23,11 @@ class Chewy
     end
 
     def handle_mouse(message)
+      # Mask painter needs motion events for drag painting
+      if @overlay == :mask_painter
+        return handle_mask_painter_mouse(message) if message.press? || message.motion?
+        return [self, nil]
+      end
       return [self, nil] unless message.press?
       return handle_overlay_mouse(message) if @overlay
 
