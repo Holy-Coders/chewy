@@ -90,7 +90,7 @@ API keys are entered in-app (stored securely with chmod 600) or via environment 
 
 ### Models
 
-Place `.gguf`, `.safetensors`, or `.ckpt` model files in `~/models` (or set `CHEWY_MODELS_DIR`). Full filenames are shown in the model picker.
+Place `.gguf`, `.safetensors`, or `.ckpt` model files in `~/.config/chewy/models` (or set `CHEWY_MODELS_DIR`). Full filenames are shown in the model picker.
 
 Chewy also scans for models from:
 - **DiffusionBee** (`~/.diffusionbee`)
@@ -104,7 +104,7 @@ FLUX models require companion files (clip_l, t5xxl, vae). Chewy will automatical
 
 ### LoRAs
 
-Place LoRA `.safetensors` files in `~/loras` (or set `CHEWY_LORA_DIR`). Press `^l` to open the LoRA selector where you can toggle LoRAs on/off, adjust weights (0.0-2.0), and download new ones.
+Place LoRA `.safetensors` files in `~/.config/chewy/loras` (or set `CHEWY_LORA_DIR`). Press `^l` to open the LoRA selector where you can toggle LoRAs on/off, adjust weights (0.0-2.0), and download new ones.
 
 Press `d` in the LoRA panel to browse recommended LoRAs or search HuggingFace and CivitAI. Recommended picks include Detail Tweaker, LCM LoRA (for fast generation), Pixel Art, and Papercut styles. Chewy warns if a LoRA doesn't match your model's architecture (e.g. SDXL LoRA on SD 1.5 model).
 
@@ -150,14 +150,14 @@ Press `^b` to browse for an input image, or `^v` to paste from clipboard. Adjust
 
 ### Configuration
 
-Config is stored at `~/.config/sdtui/config.yml`. Presets are stored at `~/.config/sdtui/presets.yml`.
+Config is stored at `~/.config/chewy/config.yml`. Presets are stored at `~/.config/chewy/presets.yml`.
 
 | Env var | Description |
 |---------|-------------|
 | `SD_BIN` | Path to the `sd` binary |
-| `CHEWY_MODELS_DIR` | Model directory (default: `~/models`) |
+| `CHEWY_MODELS_DIR` | Model directory (default: `~/.config/chewy/models`) |
 | `CHEWY_OUTPUT_DIR` | Output directory (default: `./outputs`) |
-| `CHEWY_LORA_DIR` | LoRA directory (default: `~/loras`) |
+| `CHEWY_LORA_DIR` | LoRA directory (default: `~/.config/chewy/loras`) |
 
 ## Contributing
 

@@ -52,7 +52,7 @@ class Chewy < Formula
 
       Run `chewy` to launch the TUI.
 
-      Place models in ~/models or set CHEWY_MODELS_DIR.
+      Place models in ~/.config/chewy/models or set CHEWY_MODELS_DIR.
       Press ^d inside chewy to download models from HuggingFace.
     EOS
   end

@@ -280,8 +280,8 @@
       <h2 id="first-run">First Run</h2>
       <p>When you first launch Chewy, it will:</p>
       <ul>
-        <li>Create a config file at <code>~/.config/sdtui/config.yml</code></li>
-        <li>Scan for models in <code>~/models</code> (and DiffusionBee/Draw Things directories)</li>
+        <li>Create a config file at <code>~/.config/chewy/config.yml</code></li>
+        <li>Scan for models in <code>~/.config/chewy/models</code> (and DiffusionBee/Draw Things directories)</li>
         <li>Show an animated splash screen</li>
         <li>Check for updates</li>
       </ul>
@@ -321,7 +321,7 @@
       </div>
 
       <h2 id="models">Models</h2>
-      <p>Place model files (<code>.gguf</code>, <code>.safetensors</code>, <code>.ckpt</code>) in <code>~/models</code>. Chewy also automatically scans:</p>
+      <p>Place model files (<code>.gguf</code>, <code>.safetensors</code>, <code>.ckpt</code>) in <code>~/.config/chewy/models</code>. Chewy also automatically scans:</p>
       <ul>
         <li><strong>DiffusionBee</strong> — <code>~/.diffusionbee</code></li>
         <li><strong>Draw Things</strong> — <code>~/Library/Containers/com.liuliu.draw-things/Data/Documents/Models</code></li>
@@ -343,7 +343,7 @@
       <p>Select "Browse HuggingFace..." or "Browse CivitAI..." to search for models online. CivitAI is the largest community hub for Stable Diffusion models. Downloads support resume — if interrupted, just try again.</p>
 
       <h2 id="loras">LoRAs</h2>
-      <p>LoRAs (Low-Rank Adaptations) are small add-on weights that modify a base model's style or capabilities. Place LoRA <code>.safetensors</code> files in <code>~/loras</code>.</p>
+      <p>LoRAs (Low-Rank Adaptations) are small add-on weights that modify a base model's style or capabilities. Place LoRA <code>.safetensors</code> files in <code>~/.config/chewy/loras</code>.</p>
 
       <h3>Using LoRAs</h3>
       <p>Press <code>^l</code> to open the LoRA selector:</p>
@@ -396,7 +396,7 @@
         <li><code>s</code> — save current settings as a new preset</li>
         <li><code>d</code> — delete a custom preset</li>
       </ul>
-      <p>Custom presets are saved to <code>~/.config/sdtui/presets.yml</code>.</p>
+      <p>Custom presets are saved to <code>~/.config/chewy/presets.yml</code>.</p>
 
       <h2 id="prompt-history">Prompt History</h2>
       <p>Chewy remembers every prompt you've used across sessions. Press <code>up</code> / <code>down</code> while in the prompt field to cycle through your history.</p>
@@ -528,15 +528,15 @@ bar_text: "#000000"</code></pre>
       <p>To use ControlNet, you need both a ControlNet image and a ControlNet model file. These can be selected via the file picker.</p>
 
       <h2 id="configuration">Configuration</h2>
-      <p>Config is stored at <code>~/.config/sdtui/config.yml</code>. Most settings can be changed in-app, but you can also set these environment variables:</p>
+      <p>Config is stored at <code>~/.config/chewy/config.yml</code>. Most settings can be changed in-app, but you can also set these environment variables:</p>
 
       <table>
         <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
         <tbody>
           <tr><td><code>SD_BIN</code></td><td><code>sd</code> (on PATH)</td><td>Path to the stable-diffusion.cpp binary</td></tr>
-          <tr><td><code>CHEWY_MODELS_DIR</code></td><td><code>~/models</code></td><td>Directory containing model files</td></tr>
+          <tr><td><code>CHEWY_MODELS_DIR</code></td><td><code>~/.config/chewy/models</code></td><td>Directory containing model files</td></tr>
           <tr><td><code>CHEWY_OUTPUT_DIR</code></td><td><code>./outputs</code></td><td>Directory for generated images</td></tr>
-          <tr><td><code>CHEWY_LORA_DIR</code></td><td><code>~/loras</code></td><td>Directory containing LoRA files</td></tr>
+          <tr><td><code>CHEWY_LORA_DIR</code></td><td><code>~/.config/chewy/loras</code></td><td>Directory containing LoRA files</td></tr>
           <tr><td><code>OPENAI_API_KEY</code></td><td>&mdash;</td><td>OpenAI API key</td></tr>
           <tr><td><code>GEMINI_API_KEY</code></td><td>&mdash;</td><td>Google Gemini API key</td></tr>
           <tr><td><code>HUGGINGFACE_API_KEY</code></td><td>&mdash;</td><td>HuggingFace API key</td></tr>
