@@ -27,7 +27,12 @@ class Chewy
           ext = File.extname(path).delete(".").upcase
           is_flux = flux_model?(path)
 
-          type_tag = if is_flux
+          is_wan = wan_model?(path)
+          type_tag = if is_wan
+            ok = wan_companions_present?
+            s = Lipgloss::Style.new.foreground(ok ? Theme.SUCCESS : Theme.WARNING).bold(true)
+            s.render(ok ? "Wan VIDEO" : "Wan (needs companions)")
+          elsif is_flux
             ok = flux_companions_present?
             s = Lipgloss::Style.new.foreground(ok ? Theme.SUCCESS : Theme.WARNING).bold(true)
             s.render(ok ? "FLUX" : "FLUX (needs companions)")
@@ -374,9 +379,14 @@ class Chewy
       list_lines = @gallery_images.each_with_index.map do |img, i|
         next nil if i < scroll_offset || i >= scroll_offset + visible
 
-        fname = File.basename(img[:path], ".png")
-        prompt = (gallery_meta(img)["prompt"] || "")[0, list_w - 6]
-        label = prompt.empty? ? fname : prompt
+        video_tag = img[:type] == :video ? "[VIDEO] " : ""
+        fname = if img[:type] == :video && img[:frames_dir]
+          File.basename(img[:frames_dir])
+        else
+          File.basename(img[:path], ".png")
+        end
+        prompt = (gallery_meta(img)["prompt"] || "")[0, list_w - 6 - video_tag.length]
+        label = prompt.empty? ? "#{video_tag}#{fname}" : "#{video_tag}#{prompt}"
         if i == @gallery_index
           sel_style.render("> #{label}")
         else
@@ -425,6 +435,12 @@ class Chewy
           parts << "seed:#{meta["seed"]}" if meta["seed"]
           info_lines << meta_key.render(parts.join(" | "))
         end
+        if entry[:type] == :video
+          frame_count = entry[:frame_paths]&.length || meta["frame_count"] || 0
+          fps_val = meta["fps"] || @params[:fps] || 24
+          duration = frame_count > 0 ? (frame_count.to_f / fps_val).round(1) : 0
+          info_lines << "#{meta_key.render("Video:")} #{meta_val.render("#{frame_count} frames, #{fps_val} fps, #{duration}s")}"
+        end
         if meta["generation_time_seconds"]
           info_lines << "#{meta_key.render("Time:")} #{meta_val.render("#{meta["generation_time_seconds"]}s")}"
         end
@@ -462,7 +478,10 @@ class Chewy
         end
       end
 
-      title_bar = title_style.render("Gallery") + "  " + dim.render("#{@gallery_images.length} images")
+      video_count = @gallery_images.count { |e| e[:type] == :video }
+      image_count = @gallery_images.length - video_count
+      count_text = video_count > 0 ? "#{image_count} images, #{video_count} videos" : "#{@gallery_images.length} images"
+      title_bar = title_style.render("Gallery") + "  " + dim.render(count_text)
       outer = Lipgloss::Style.new.padding(0, 1).render(
         Lipgloss.join_vertical(:left, title_bar, body)
       )
@@ -645,44 +664,68 @@ class Chewy
 
       dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
 
-      lines = all.each_with_index.map do |p, i|
+      # Build compact lines: selected item gets description, others are one-line
+      visible_h = @height - 8  # leave room for title, status, padding
+      half = visible_h / 3     # each selected item takes ~3 lines
+      scroll_offset = if @preset_index < half
+                        0
+                      elsif @preset_index >= all.length - half
+                        [all.length - visible_h / 2, 0].max
+                      else
+                        @preset_index - half
+                      end
+
+      lines = all.each_with_index.filter_map do |p, i|
         selected = i == @preset_index
         d = p[:data]
         tag = p[:builtin] ?
           Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" built-in") :
           Lipgloss::Style.new.foreground(Theme.SUCCESS).render(" custom")
 
-        # Friendly description from preset data, or fall back to technical details
-        friendly = d['desc']
-        tech_parts = []
-        if d['model']
-          tech_parts << File.basename(d['model'], File.extname(d['model']))
-        elsif d['model_type']
-          tech_parts << d['model_type'].upcase
-        end
-        tech_parts << "#{d['steps']} steps" if d['steps']
-        tech_parts << "#{d['width']}x#{d['height']}" if d['width'] && d['height']
-        tech_parts << "str:#{d['strength']}" if d['strength']
-        tech = dim.render(tech_parts.join(" / "))
-
-        desc_line = friendly ? Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render(friendly) : ""
-
         if selected
+          friendly = d['desc']
+          tech_parts = []
+          if d['model']
+            tech_parts << File.basename(d['model'], File.extname(d['model']))
+          elsif d['model_type']
+            tech_parts << d['model_type'].upcase
+          end
+          tech_parts << "#{d['steps']} steps" if d['steps']
+          tech_parts << "#{d['width']}x#{d['height']}" if d['width'] && d['height']
+          tech_parts << "str:#{d['strength']}" if d['strength']
+          tech_parts << "#{d['video_frames']} frames" if d['video_frames']
+          tech = dim.render(tech_parts.join(" / "))
+          desc_line = friendly ? Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render(friendly) : ""
+
           cursor = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true).render("> ")
           name = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true).render(p[:name])
-          result = "#{cursor}#{name}#{tag}"
-          result += "\n    #{desc_line}" if friendly
-          result += "\n    #{tech}" unless tech_parts.empty?
-          result
+          entry = "#{cursor}#{name}#{tag}"
+          entry += "\n    #{desc_line}" if friendly
+          entry += "\n    #{tech}" unless tech_parts.empty?
+          entry
         else
           name = Lipgloss::Style.new.foreground(Theme.TEXT).render(p[:name])
-          result = "  #{name}#{tag}"
-          result += "\n    #{desc_line}" if friendly
-          result
+          "  #{name}#{tag}"
         end
       end
 
-      result = lines.join("\n")
+      # Apply scroll window
+      total_lines = lines.join("\n").lines.count
+      if total_lines > visible_h
+        # Simple scroll: show lines around selection
+        flat = lines.join("\n").lines
+        line_idx = 0; sel_line = 0
+        lines.each_with_index do |entry, i|
+          sel_line = line_idx if i == @preset_index
+          line_idx += entry.count("\n") + 1
+        end
+        start = [sel_line - visible_h / 2, 0].max
+        start = [start, flat.length - visible_h].min if flat.length > visible_h
+        flat = flat[start, visible_h] || flat
+        result = flat.join
+      else
+        result = lines.join("\n")
+      end
       if @naming_preset
         prompt_style = Lipgloss::Style.new.foreground(Theme.ACCENT)
         result += "\n\n#{prompt_style.render("Name:")} #{@preset_name_buffer}_"

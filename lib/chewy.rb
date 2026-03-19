@@ -31,6 +31,7 @@ require_relative "chewy/rendering"
 require_relative "chewy/overlay_rendering"
 require_relative "chewy/image_rendering"
 require_relative "chewy/prompt_enhance"
+require_relative "chewy/video"
 require_relative "chewy/cli"
 
 class Chewy
@@ -46,6 +47,7 @@ class Chewy
   include OverlayRendering
   include ImageRendering
   include PromptEnhance
+  include Video
 
   def initialize
     @config = load_config
@@ -99,7 +101,9 @@ class Chewy
     dh = @config["default_height"] || 512
     @params = { steps: ds, cfg_scale: dc, width: dw, height: dh, seed: -1, batch: 1, strength: 0.75,
                  guidance: (@config["default_guidance"] || 3.5).to_f,
-                 threads: @config["default_threads"] || [Etc.nprocessors - 2, 1].max }
+                 threads: @config["default_threads"] || [Etc.nprocessors - 2, 1].max,
+                 video_frames: @config["default_video_frames"] || 17,
+                 fps: @config["default_fps"] || 24 }
     @sampler = @config["default_sampler"] || "euler_a"
     @sampler_index = SAMPLER_OPTIONS.index(@sampler) || 1
     @scheduler = @config["default_scheduler"] || "discrete"
@@ -143,7 +147,7 @@ class Chewy
     @remote_model_id = @config["remote_model"] || nil
     @remote_model_index = 0
 
-    # Overlay: nil, :models, :download, :lora, :preset, :hf_token, :gallery, :fullscreen_image, :file_picker, :theme, :provider
+    # Overlay: nil, :models, :download, :lora, :preset, :hf_token, :gallery, :fullscreen_image, :file_picker, :theme, :provider, :video_player
     @overlay = nil
 
     # img2img / ControlNet
@@ -295,6 +299,19 @@ class Chewy
     # Prompt enhancement
     @prompt_enhancing = false
 
+    # Video playback
+    @video_frame_paths = []
+    @video_frames_dir = nil
+    @video_frame_index = 0
+    @video_playing = false
+    @video_playback_fps = 24
+    @video_playback_gen = 0
+    @video_mp4_path = nil
+
+    # Video generation progress
+    @gen_video_frame = nil
+    @gen_video_frame_total = nil
+
     # Splash screen
     @splash = true
     @splash_phase = 0
@@ -394,6 +411,10 @@ class Chewy
       @starter_pack_completed += 1
       @starter_pack_errors << message.item_name
       return start_next_starter_pack_item
+    when VideoGenerationDoneMessage
+      handle_video_done(message)
+    when VideoFrameTickMessage
+      handle_video_frame_tick(message)
     when PromptEnhanceMessage
       handle_prompt_enhance_result(message)
     when ClipboardPasteMessage
@@ -481,6 +502,7 @@ class Chewy
       when :theme then render_overlay_panel("Theme", render_theme_content, render_theme_status)
       when :provider then render_overlay_panel("Provider", render_provider_content, render_provider_status)
       when :api_key then render_overlay_panel("API Key", render_api_key_content, render_api_key_status)
+      when :video_player then render_video_player_view
       else render_main_view
       end
     end

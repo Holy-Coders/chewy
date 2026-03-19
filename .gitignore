@@ -4,3 +4,6 @@ outputs/
 bin/sd
 .bundle/
 vendor/
+.env
+*.key
+.config/

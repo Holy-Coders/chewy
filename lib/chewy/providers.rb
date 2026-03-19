@@ -7,14 +7,15 @@ module Provider
     :negative_prompt, :seed, :batch, :img2img, :live_preview,
     :cancel, :model_listing, :lora, :cfg_scale, :sampler,
     :scheduler, :threads, :strength, :width_height, :controlnet,
-    :inpainting,
+    :inpainting, :video,
     keyword_init: true
   ) do
     def initialize(**kwargs)
       defaults = { negative_prompt: false, seed: false, batch: false, img2img: false,
                    live_preview: false, cancel: false, model_listing: false, lora: false,
                    cfg_scale: false, sampler: false, scheduler: false, threads: false,
-                   strength: false, width_height: true, controlnet: false, inpainting: false }
+                   strength: false, width_height: true, controlnet: false, inpainting: false,
+                   video: false }
       super(**defaults.merge(kwargs))
     end
   end
@@ -26,10 +27,14 @@ module Provider
     :is_flux, :flux_clip_l, :flux_t5xxl, :flux_vae, :guidance,
     :controlnet_model, :controlnet_image, :controlnet_strength, :controlnet_canny,
     :mask_image,
+    :video_mode, :video_frames, :fps, :flow_shift,
+    :is_wan, :wan_t5xxl, :wan_clip_vision, :wan_vae,
     keyword_init: true
   )
 
-  GenerationResult = Struct.new(:paths, :seeds, :elapsed, :error, keyword_init: true)
+  GenerationResult = Struct.new(:paths, :seeds, :elapsed, :error,
+    :video_frames_dir, :video_frame_paths, :mp4_path,
+    keyword_init: true)
 
   # Where provider API keys are stored (not in config YAML)
   KEYS_DIR = File.join(CONFIG_DIR, "keys")
@@ -92,14 +97,23 @@ class LocalSdCppProvider < Provider::Base
       negative_prompt: true, seed: true, batch: true, img2img: true,
       live_preview: true, cancel: true, model_listing: true, lora: true,
       cfg_scale: true, sampler: true, scheduler: true, threads: true,
-      strength: true, width_height: true, controlnet: true, inpainting: true
+      strength: true, width_height: true, controlnet: true, inpainting: true,
+      video: true
     )
   end
 
   def generate(request, cancelled: -> { false }, &on_event)
     preview_path = File.join(request.output_dir, ".preview_#{Process.pid}.png")
     timestamp = Time.now.strftime("%Y%m%d_%H%M%S")
-    output_path = File.join(request.output_dir, "#{timestamp}.png")
+
+    if request.video_mode
+      # Video mode: output frame sequence with printf-style pattern
+      frames_dir = File.join(request.output_dir, "#{timestamp}_frames")
+      FileUtils.mkdir_p(frames_dir)
+      output_path = File.join(frames_dir, "#{timestamp}_%03d.png")
+    else
+      output_path = File.join(request.output_dir, "#{timestamp}.png")
+    end
 
     on_event&.call(:preview_path, preview_path)
 
@@ -160,19 +174,36 @@ class LocalSdCppProvider < Provider::Base
     File.delete(preview_path) if File.exist?(preview_path)
     on_event&.call(:preview_path, nil)
 
-    if cancelled.call || status&.signaled?
+    if cancelled.call
       cleanup_outputs(output_path, request.batch)
       return Provider::GenerationResult.new(error: "Cancelled")
     end
 
+    if status&.signaled?
+      sig = status.termsig
+      return Provider::GenerationResult.new(error: diagnose_error(all_output, status, request.model))
+    end
+
     if status&.success? || status.nil?
-      generated = collect_outputs(output_path, request, batch_seeds, parsed_seed)
-      if generated.any?
-        Provider::GenerationResult.new(
-          paths: generated.map(&:first), seeds: generated.map(&:last), elapsed: elapsed
-        )
+      if request.video_mode
+        frame_paths = Dir.glob(File.join(frames_dir, "*.png")).sort
+        if frame_paths.any?
+          Provider::GenerationResult.new(
+            paths: frame_paths, seeds: [parsed_seed], elapsed: elapsed,
+            video_frames_dir: frames_dir, video_frame_paths: frame_paths
+          )
+        else
+          Provider::GenerationResult.new(error: diagnose_error(all_output, status, request.model))
+        end
       else
-        Provider::GenerationResult.new(error: diagnose_error(all_output, status, request.model))
+        generated = collect_outputs(output_path, request, batch_seeds, parsed_seed)
+        if generated.any?
+          Provider::GenerationResult.new(
+            paths: generated.map(&:first), seeds: generated.map(&:last), elapsed: elapsed
+          )
+        else
+          Provider::GenerationResult.new(error: diagnose_error(all_output, status, request.model))
+        end
       end
     else
       Provider::GenerationResult.new(error: diagnose_error(all_output, status, request.model))
@@ -192,7 +223,26 @@ class LocalSdCppProvider < Provider::Base
   private
 
   def build_command(request, output_path, preview_path)
-    args = if request.is_flux
+    args = if request.is_wan
+      wan_args = [@sd_bin, "--diffusion-model", request.model,
+       "--t5xxl", request.wan_t5xxl, "--vae", request.wan_vae,
+       "-M", "vid_gen",
+       "-p", request.prompt,
+       "--steps", request.steps.to_s, "--cfg-scale", request.cfg_scale.to_s,
+       "--video-frames", (request.video_frames || 17).to_s,
+       "--fps", (request.fps || 8).to_s,
+       "-W", request.width.to_s, "-H", request.height.to_s,
+       "--seed", request.seed.to_s, "--sampling-method", request.sampler,
+       "--scheduler", request.scheduler,
+       "-t", request.threads.to_s,
+       "--clip-on-cpu", "--vae-on-cpu", "--vae-tiling",
+       "-o", output_path]
+      # clip_vision is only needed for img2vid (I2V) models
+      if request.wan_clip_vision && request.init_image
+        wan_args += ["--clip_vision", request.wan_clip_vision]
+      end
+      wan_args
+    elsif request.is_flux
       [@sd_bin, "--diffusion-model", request.model,
        "--clip_l", request.flux_clip_l, "--t5xxl", request.flux_t5xxl, "--vae", request.flux_vae,
        "-p", request.prompt,
@@ -216,14 +266,18 @@ class LocalSdCppProvider < Provider::Base
        "-b", request.batch.to_s,
        "-o", output_path]
     end
-    args += ["--preview", "proj", "--preview-path", preview_path, "--preview-interval", "1"]
-    args += ["--negative-prompt", request.negative_prompt] unless request.negative_prompt.empty?
-    args += ["--lora-model-dir", @lora_dir] if request.loras&.any? && !request.is_flux
-    if request.init_image
-      args += ["--init-img", request.init_image, "--strength", request.strength.to_s]
+    unless request.is_wan
+      args += ["--preview", "proj", "--preview-path", preview_path, "--preview-interval", "1"]
     end
-    args += ["--mask", request.mask_image] if request.mask_image
-    if request.controlnet_model && request.controlnet_image
+    args += ["--negative-prompt", request.negative_prompt] unless request.negative_prompt.empty?
+    args += ["--flow-shift", request.flow_shift.to_s] if request.is_wan && request.flow_shift
+    args += ["--lora-model-dir", @lora_dir] if request.loras&.any? && !request.is_flux && !request.is_wan
+    if request.init_image
+      args += ["--init-img", request.init_image]
+      args += ["--strength", request.strength.to_s] unless request.is_wan
+    end
+    args += ["--mask", request.mask_image] if request.mask_image && !request.is_wan
+    if request.controlnet_model && request.controlnet_image && !request.is_wan
       args += ["--control-net", request.controlnet_model, "--control-image", request.controlnet_image]
       args += ["--control-strength", (request.controlnet_strength || 0.9).to_s]
       args << "--canny" if request.controlnet_canny
@@ -273,6 +327,11 @@ class LocalSdCppProvider < Provider::Base
         sps = $4 == "s/it" ? speed_val : (speed_val > 0 ? 1.0 / speed_val : 0)
         on_event&.call(:progress, { step: step, total: total, secs_per_step: sps })
       end
+      # Wan video frame progress (e.g., "generating frame 5/33")
+      if seg =~ /generating\s+frame\s+(\d+)\s*\/\s*(\d+)/i
+        on_event&.call(:video_frame_progress, { frame: $1.to_i, total: $2.to_i })
+        on_event&.call(:status, "Frame #{$1}/#{$2}")
+      end
     end
     yield new_buf, sampling_started, parsed_seed
   end
@@ -314,7 +373,11 @@ class LocalSdCppProvider < Provider::Base
       name = File.basename(model)
       "\"#{name}\" is not a supported diffusion model — try a different model"
     elsif all_output.include?("out of memory") || all_output.include?("GGML_ASSERT")
-      "Not enough memory for this model — try a smaller/quantized version"
+      "Not enough memory for this model — try a smaller/quantized version or reduce video_frames"
+    elsif status&.signaled?
+      sig = status.termsig
+      sig_name = Signal.signame(sig) rescue sig.to_s
+      "Process killed by signal #{sig_name} — likely out of memory"
     else
       "Failed (exit #{exit_code}): #{last_line}"
     end

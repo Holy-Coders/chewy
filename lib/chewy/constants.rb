@@ -9,6 +9,12 @@ CIVITAI_API_BASE = "https://civitai.com/api/v1"
 MODEL_EXTENSIONS = %w[.gguf .safetensors .ckpt .pth].freeze
 DOWNLOAD_SOURCES = [:huggingface, :civitai].freeze
 
+# Filename prefixes for companion/auxiliary files — excluded from model file listings
+COMPANION_FILE_PATTERNS = %w[clip_l t5xxl umt5 ae clip_vision wan_2.1_vae].freeze
+
+# HuggingFace repo patterns known to be incompatible with sd.cpp
+INCOMPATIBLE_HF_PATTERNS = %w[whisper llama mistral phi gemma qwen deepseek codellama].freeze
+
 # Common macOS app model directories
 EXTRA_MODEL_DIRS = [
   File.expand_path("~/.diffusionbee"),
@@ -58,6 +64,11 @@ BUILTIN_PRESETS = {
   "FLUX — Fast" => { "desc" => "Quick FLUX generation in 4 steps", "steps" => 4, "cfg_scale" => 1.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
   "FLUX — Balanced" => { "desc" => "Good FLUX quality at 1024x1024", "steps" => 8, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
   "FLUX — High Quality" => { "desc" => "Best FLUX output, more steps", "steps" => 20, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
+  # --- Video (Wan) ---
+  "Video — Quick Preview" => { "desc" => "Fast 8-frame test (1s)", "steps" => 10, "cfg_scale" => 5.0, "width" => 384, "height" => 672, "video_frames" => 9, "fps" => 8, "sampler" => "euler", "scheduler" => "simple", "model_type" => "wan" },
+  "Video — Standard" => { "desc" => "Good quality 2s clip", "steps" => 15, "cfg_scale" => 5.0, "width" => 384, "height" => 672, "video_frames" => 17, "fps" => 8, "sampler" => "euler", "scheduler" => "simple", "model_type" => "wan" },
+  "Video — High Quality" => { "desc" => "Detailed 2s video at 480p", "steps" => 20, "cfg_scale" => 5.0, "width" => 480, "height" => 832, "video_frames" => 33, "fps" => 16, "sampler" => "euler", "scheduler" => "simple", "model_type" => "wan" },
+  "Video — Img2Vid" => { "desc" => "Animate an image into video", "steps" => 15, "cfg_scale" => 5.0, "width" => 384, "height" => 672, "video_frames" => 17, "fps" => 8, "strength" => 0.75, "sampler" => "euler", "scheduler" => "simple", "model_type" => "wan" },
   # --- Styles ---
   "Photorealistic" => { "desc" => "Lifelike photos — portraits, products, scenes", "steps" => 35, "cfg_scale" => 5.0, "width" => 768, "height" => 768, "sampler" => "dpm++2m", "scheduler" => "karras" },
   "Artistic / Painterly" => { "desc" => "Oil painting, watercolor, illustrated look", "steps" => 30, "cfg_scale" => 10.0, "width" => 768, "height" => 768, "sampler" => "euler_a", "scheduler" => "karras" },
@@ -99,6 +110,12 @@ MODEL_FAMILIES = {
     description: "State-of-the-art — needs companion files",
     default_resolution: [1024, 1024],
   },
+  "Wan" => {
+    label: "Wan Video",
+    aliases: ["Wan2.1", "Wan2.2", "wan-t2v", "wan-i2v"],
+    description: "Video generation — Wan 2.1/2.2 via sd.cpp",
+    default_resolution: [384, 672],
+  },
 }.freeze
 
 # Canonical family names for quick lookup from aliases
@@ -114,6 +131,7 @@ MODEL_BEST_SETTINGS = {
   "SD 1.x" => { "steps" => 20, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler_a", "scheduler" => "karras" },
   "SD 2.x" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 768, "height" => 768, "sampler" => "euler_a", "scheduler" => "karras" },
   "SD3"    => { "steps" => 28, "cfg_scale" => 5.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple" },
+  "Wan"    => { "steps" => 15, "cfg_scale" => 5.0, "width" => 384, "height" => 672, "sampler" => "euler", "scheduler" => "simple", "video_frames" => 17, "fps" => 8 },
 }.freeze
 
 # Recommended img2img settings per model type — higher steps + tuned strength
@@ -123,6 +141,7 @@ IMG2IMG_BEST_SETTINGS = {
   "SD 1.x" => { "steps" => 30, "cfg_scale" => 7.0, "strength" => 0.75, "sampler" => "euler_a", "scheduler" => "karras" },
   "SD 2.x" => { "steps" => 30, "cfg_scale" => 7.0, "strength" => 0.7, "sampler" => "euler_a", "scheduler" => "karras" },
   "SD3"    => { "steps" => 35, "cfg_scale" => 5.0, "strength" => 0.65, "sampler" => "euler", "scheduler" => "simple" },
+  "Wan"    => { "steps" => 20, "cfg_scale" => 5.0, "strength" => 0.75, "sampler" => "euler", "scheduler" => "simple" },
 }.freeze
 
 # FLUX companion files needed alongside the diffusion model
@@ -138,6 +157,22 @@ FLUX_COMPANION_FILES = {
   "vae" => {
     filename: "ae.safetensors",
     url: "https://huggingface.co/second-state/FLUX.1-schnell-GGUF/resolve/main/ae.safetensors",
+  },
+}.freeze
+
+# Wan companion files needed alongside the diffusion model
+WAN_COMPANION_FILES = {
+  "t5xxl" => {
+    filename: "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+    url: "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+  },
+  "clip_vision" => {
+    filename: "clip_vision_h.safetensors",
+    url: "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/clip_vision/clip_vision_h.safetensors",
+  },
+  "vae" => {
+    filename: "wan_2.1_vae.safetensors",
+    url: "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
   },
 }.freeze
 
@@ -196,6 +231,15 @@ PRELOADED_MODELS = [
     type: "FLUX",
     model_family: "FLUX",
     desc: "State-of-the-art FLUX — needs companion files (auto-downloaded)",
+  },
+  {
+    name: "Wan 2.1 T2V 1.3B (Q5)",
+    repo: "samuelchristlie/Wan2.1-T2V-1.3B-GGUF",
+    file: "Wan2.1-T2V-1.3B-Q5_K_M.gguf",
+    size: 1_087_410_400,
+    type: "Wan",
+    model_family: "Wan",
+    desc: "Lightweight Wan video — fast text-to-video generation",
   },
 ].freeze
 
@@ -339,6 +383,13 @@ STARTER_PACKS = [
     desc: "FLUX Schnell — best image quality, needs companion files (auto-downloaded on first use)",
     items: [
       { type: :model, repo: "second-state/FLUX.1-schnell-GGUF", file: "flux1-schnell-Q4_0.gguf", size: 6_876_948_608 },
+    ],
+  },
+  {
+    name: "Video (Wan 2.1)",
+    desc: "Wan 2.1 T2V — text-to-video generation, needs companion files (auto-downloaded)",
+    items: [
+      { type: :model, repo: "samuelchristlie/Wan2.1-T2V-1.3B-GGUF", file: "Wan2.1-T2V-1.3B-Q5_K_M.gguf", size: 1_087_410_400 },
     ],
   },
   {

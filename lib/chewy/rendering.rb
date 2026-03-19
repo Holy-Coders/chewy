@@ -311,7 +311,12 @@ class Chewy
 
           quant = name.match(/[_-](Q\d_\w+|F16|F32|q\d_\w+|f16|f32)/i)&.captures&.first&.upcase
 
-          type_label = if is_flux || cached_type == "FLUX"
+          is_wan = wan_model?(@selected_model_path)
+          type_label = if is_wan || cached_type == "Wan"
+            ok = wan_companions_present?
+            pill_bg = ok ? Theme.SUCCESS : Theme.WARNING
+            Lipgloss::Style.new.background(pill_bg).foreground(Theme.SURFACE).bold(true).render(" VIDEO ")
+          elsif is_flux || cached_type == "FLUX"
             ok = flux_companions_present?
             pill_bg = ok ? Theme.SUCCESS : Theme.WARNING
             Lipgloss::Style.new.background(pill_bg).foreground(Theme.SURFACE).bold(true).render(" FLUX ")
@@ -509,6 +514,11 @@ class Chewy
       if @gen_total_batch > 1
         batch_text = "Batch #{@gen_current_batch}/#{@gen_total_batch}"
         status_lines << center.call(Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render(batch_text))
+      end
+
+      if @gen_video_frame && @gen_video_frame_total && @gen_video_frame_total > 0
+        video_text = "Frame #{@gen_video_frame}/#{@gen_video_frame_total}"
+        status_lines << center.call(Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true).render(video_text))
       end
 
       # Try to show live preview image
@@ -935,6 +945,8 @@ class Chewy
       when :cn_strength then "CN Str   "
       when :cn_canny then "CN Canny "
       when :mask_image then "Mask     "
+      when :video_frames then "Frames   "
+      when :fps then "FPS      "
       else key.to_s.ljust(9)
       end
     end

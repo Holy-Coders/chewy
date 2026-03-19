@@ -70,6 +70,7 @@ class Chewy
       when :file_picker then handle_file_picker_key(message)
       when :mask_painter then handle_mask_painter_key(message)
       when :starter_pack then handle_starter_pack_key(message)
+      when :video_player then handle_video_player_key(message)
       else [self, nil]
       end
     end
@@ -142,7 +143,6 @@ class Chewy
         return delete_selected_model
       end
 
-      @confirm_delete_model = nil  # reset confirmation on any non-delete key
       @model_list, cmd = @model_list.update(message)
       [self, cmd]
     end
@@ -179,14 +179,6 @@ class Chewy
 
       path = @model_paths[idx]
       return [self, nil] unless File.exist?(path)
-
-      unless @confirm_delete_model
-        @confirm_delete_model = path
-        return [self, set_error_toast("Delete #{File.basename(path)}? Press delete again to confirm")]
-      end
-
-      return [self, nil] unless @confirm_delete_model == path
-      @confirm_delete_model = nil
 
       size = File.size(path)
       File.delete(path)
@@ -236,17 +228,39 @@ class Chewy
     def build_gallery
       return unless File.directory?(@output_dir)
 
+      # Collect regular images
       pngs = Dir.glob(File.join(@output_dir, "*.png")).sort.reverse
-      @gallery_images = pngs.first(100).map do |png|
-        { path: png, meta: nil }  # lazy-loaded on demand
+      entries = pngs.first(80).map do |png|
+        { path: png, meta: nil, type: :image }
       end
+
+      # Collect video frame directories — only grab first frame path lazily
+      Dir.glob(File.join(@output_dir, "*_frames")).sort.reverse.first(20).each do |frames_dir|
+        next unless File.directory?(frames_dir)
+        first_frame = Dir.glob(File.join(frames_dir, "*.png")).min
+        next unless first_frame
+        entries << {
+          path: first_frame,
+          meta: nil,
+          type: :video,
+          frames_dir: frames_dir,
+          frame_paths: nil, # loaded lazily on enter
+          mp4_path: nil,    # loaded lazily on enter
+        }
+      end
+
+      @gallery_images = entries.first(100)
       @gallery_index = 0
       @gallery_thumb_cache = {}
     end
 
     def gallery_meta(entry)
       return entry[:meta] if entry[:meta]
-      json = entry[:path].sub(/\.png$/, ".json")
+      if entry[:type] == :video && entry[:frames_dir]
+        json = File.join(entry[:frames_dir], "video.json")
+      else
+        json = entry[:path].sub(/\.png$/, ".json")
+      end
       entry[:meta] = File.exist?(json) ? (JSON.parse(File.read(json)) rescue {}) : {}
       entry[:meta]
     end
@@ -294,8 +308,6 @@ class Chewy
       return close_overlay if key == "esc" || key == "q"
       return [self, nil] if @gallery_images.empty?
 
-      @confirm_delete_gallery = nil unless key == "delete" || key == "backspace"
-
       nav_cmd = nil
       case key
       when "up", "k"
@@ -311,7 +323,28 @@ class Chewy
         @gallery_index = (@gallery_index + 1) % @gallery_images.length
         nav_cmd = gallery_debounce_preview
       when "enter", " "
-        show_fullscreen_image(@gallery_images[@gallery_index][:path])
+        entry = @gallery_images[@gallery_index]
+        if entry[:type] == :video && entry[:frames_dir]
+          # Lazily load frame paths on first open
+          entry[:frame_paths] ||= Dir.glob(File.join(entry[:frames_dir], "*.png")).sort
+          entry[:mp4_path] ||= Dir.glob(File.join(entry[:frames_dir], "*.mp4")).first
+          if entry[:frame_paths].any?
+            meta = gallery_meta(entry)
+            @video_frame_paths = entry[:frame_paths]
+            @video_frames_dir = entry[:frames_dir]
+            @video_frame_index = 0
+            @video_playing = false
+            @video_playback_fps = (meta&.dig("fps") || @params[:fps] || 16).to_i
+            @video_playback_gen += 1
+            @video_mp4_path = entry[:mp4_path]
+            @overlay = :video_player
+            clear_kitty_images if @kitty_graphics
+          else
+            show_fullscreen_image(entry[:path])
+          end
+        else
+          show_fullscreen_image(entry[:path])
+        end
         return [self, nil]
       when "ctrl+e", "ctrl+o"
         open_image(@gallery_images[@gallery_index][:path])
@@ -330,17 +363,16 @@ class Chewy
       return if @gallery_images.empty?
       entry = @gallery_images[@gallery_index]
 
-      unless @confirm_delete_gallery
-        @confirm_delete_gallery = entry[:path]
-        return [self, set_error_toast("Delete #{File.basename(entry[:path])}? Press delete again to confirm")]
+      if entry[:type] == :video && entry[:frames_dir]
+        # Validate directory is within output_dir before recursive delete
+        real_dir = File.realpath(entry[:frames_dir]) rescue nil
+        real_output = File.realpath(@output_dir) rescue nil
+        FileUtils.rm_rf(entry[:frames_dir]) if real_dir && real_output && real_dir.start_with?(real_output + "/")
+      else
+        File.delete(entry[:path]) if File.exist?(entry[:path])
+        json = entry[:path].sub(/\.png$/, ".json")
+        File.delete(json) if File.exist?(json)
       end
-
-      return if @confirm_delete_gallery != entry[:path]
-      @confirm_delete_gallery = nil
-
-      File.delete(entry[:path]) if File.exist?(entry[:path])
-      json = entry[:path].sub(/\.png$/, ".json")
-      File.delete(json) if File.exist?(json)
       @gallery_thumb_cache.delete(entry[:path])
       @gallery_images.delete_at(@gallery_index)
       @gallery_index = [[@gallery_index, @gallery_images.length - 1].min, 0].max
@@ -492,6 +524,8 @@ class Chewy
       end
       @params[:strength] = d["strength"].to_f if d["strength"]
       @params[:guidance] = d["guidance"].to_f if d["guidance"]
+      @params[:video_frames] = d["video_frames"] if d["video_frames"]
+      @params[:fps] = d["fps"] if d["fps"]
 
       # ControlNet settings
       if d.key?("cn_strength")
@@ -528,6 +562,10 @@ class Chewy
       }
       data["model"] = @selected_model_path if @selected_model_path
       data["strength"] = @params[:strength] if @init_image_path
+      if @selected_model_path && wan_model?(@selected_model_path)
+        data["video_frames"] = @params[:video_frames]
+        data["fps"] = @params[:fps]
+      end
       @user_presets[name] = data
       save_presets
     end
@@ -906,6 +944,7 @@ class Chewy
         end
         # Resume the action that triggered the token prompt
         return download_flux_companions if pending == :flux_companions
+        return download_wan_companions if pending == :wan_companions
         return [self, toast]
       end
       @hf_token_input, cmd = @hf_token_input.update(message)

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Chewy Docs — Complete Guide</title>
-  <meta name="description" content="Complete documentation for Chewy, the terminal UI for AI image generation.">
+  <meta name="description" content="Complete documentation for Chewy, the terminal UI for AI image and video generation.">
   <link rel="icon" href="assets/logo.jpeg">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
@@ -244,6 +244,7 @@
       <h4>Advanced</h4>
       <a href="#samplers">Samplers & Schedulers</a>
       <a href="#flux">FLUX Models</a>
+      <a href="#video">Video Generation</a>
       <a href="#controlnet">ControlNet</a>
       <a href="#configuration">Configuration</a>
       <a href="#cli">CLI Commands</a>
@@ -295,7 +296,7 @@
       <table>
         <thead><tr><th>Provider</th><th>Models</th><th>Type</th></tr></thead>
         <tbody>
-          <tr><td><strong>Local (sd.cpp)</strong></td><td>SD 1.x/2.x/3.5, SDXL, FLUX</td><td>Local</td></tr>
+          <tr><td><strong>Local (sd.cpp)</strong></td><td>SD 1.x/2.x/3.5, SDXL, FLUX, Wan Video</td><td>Local</td></tr>
           <tr><td><strong>OpenAI</strong></td><td>GPT Image 1, DALL-E 3, DALL-E 2</td><td>API</td></tr>
           <tr><td><strong>Gemini</strong></td><td>Imagen 3, Imagen 3 Fast, Gemini 2.0 Flash</td><td>API</td></tr>
           <tr><td><strong>HuggingFace</strong></td><td>FLUX.1 Schnell/Dev, SDXL, SD 3.5 Large, HiDream</td><td>API</td></tr>
@@ -545,6 +546,42 @@ bar_text: "#000000"</code></pre>
       <div class="tip">
         <p><strong>FLUX Schnell vs Dev:</strong> Schnell is faster (4-8 steps) but less flexible. Dev produces higher quality but needs more steps (20-50). Schnell doesn't work well with img2img.</p>
       </div>
+
+      <h2 id="video">Video Generation (Experimental)</h2>
+      <p>Chewy supports text-to-video generation via <strong>Wan 2.1</strong> models using sd.cpp's <code>-M vid_gen</code> mode.</p>
+
+      <div class="tip">
+        <p><strong>Hardware requirements:</strong> Video generation is experimental and works best with dedicated GPU hardware. The Wan 1.3B model requires ~12GB RAM for weights alone. CPU-only generation is very slow (minutes per frame). A machine with 32GB+ RAM and a Metal/CUDA GPU is recommended.</p>
+      </div>
+
+      <h3>Getting started</h3>
+      <ol>
+        <li>Download a Wan model from the model browser (<code>^d</code>) — "Wan 2.1 T2V 1.3B (Q5)" is available in the recommended list</li>
+        <li>Select the Wan model (<code>^n</code>) — a <strong>VIDEO</strong> badge appears in the header</li>
+        <li>Companion files (t5xxl ~6.3GB, clip_vision ~1.2GB, vae ~242MB) are auto-downloaded on first generation</li>
+        <li>Adjust <strong>Frames</strong> and <strong>FPS</strong> in the params panel (Wan requires frame counts of 1+4n: 5, 9, 13, 17, 21, 25, 29, 33...)</li>
+        <li>Write a prompt and press <code>enter</code></li>
+      </ol>
+
+      <h3>Video player</h3>
+      <p>After generation, an in-terminal video player opens automatically:</p>
+      <table>
+        <thead><tr><th>Key</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td><code>space</code></td><td>Play / pause</td></tr>
+          <tr><td><code>&larr;</code> / <code>&rarr;</code></td><td>Step frame by frame</td></tr>
+          <tr><td><code>[</code> / <code>]</code></td><td>Decrease / increase playback speed</td></tr>
+          <tr><td><code>0</code> / <code>$</code></td><td>Jump to first / last frame</td></tr>
+          <tr><td><code>o</code></td><td>Open MP4 in external player (requires ffmpeg)</td></tr>
+          <tr><td><code>q</code></td><td>Close player</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Video presets</h3>
+      <p>Press <code>^p</code> and look for the "Video" presets: Quick Preview (9 frames), Standard (17 frames), High Quality (33 frames), and Img2Vid.</p>
+
+      <h3>Output format</h3>
+      <p>Videos are saved as PNG frame sequences in <code>outputs/&lt;timestamp&gt;_frames/</code>. If ffmpeg is installed, Chewy also assembles an MP4 automatically. Videos appear in the gallery (<code>^a</code>) with a <strong>[VIDEO]</strong> tag.</p>
 
       <h2 id="controlnet">ControlNet</h2>
       <p>ControlNet allows you to guide generation using a reference image's structure (edges, depth, pose). It's supported for SD 1.5, SD 2.x, and SDXL models (not FLUX).</p>

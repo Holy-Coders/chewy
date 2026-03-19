@@ -33,9 +33,12 @@ class Chewy
         "theme" => Theme.current_name,
         "active_provider" => @provider&.id || "local_sd_cpp",
         "remote_model" => @remote_model_id,
+        "default_video_frames" => @params&.dig(:video_frames) || 33,
+        "default_fps" => @params&.dig(:fps) || 24,
       }
       @config = data
       File.write(CONFIG_PATH, YAML.dump(data))
+      File.chmod(0600, CONFIG_PATH) rescue nil
     rescue
       nil
     end
@@ -50,6 +53,7 @@ class Chewy
     def save_presets
       FileUtils.mkdir_p(CONFIG_DIR)
       File.write(PRESETS_PATH, YAML.dump(@user_presets))
+      File.chmod(0600, PRESETS_PATH) rescue nil
     rescue
       nil
     end
@@ -84,6 +88,11 @@ class Chewy
       # Guidance is FLUX-specific (separate from cfg_scale)
       if @provider.provider_type == :local && @selected_model_path && flux_model?(@selected_model_path)
         keys << :guidance
+      end
+      # Video params for Wan models
+      if @provider.provider_type == :local && @selected_model_path && wan_model?(@selected_model_path)
+        keys << :video_frames
+        keys << :fps
       end
       keys << :threads if caps.threads
       if caps.controlnet

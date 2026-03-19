@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chewy — AI Image Generation in Your Terminal</title>
-  <meta name="description" content="A beautiful terminal UI for AI image generation with Stable Diffusion, FLUX, DALL-E, Imagen, and more. Local or cloud — your choice.">
-  <meta property="og:title" content="Chewy — AI Image Generation in Your Terminal">
-  <meta property="og:description" content="A beautiful terminal UI for AI image generation with 6 providers: local sd.cpp, OpenAI, A1111, Gemini, HuggingFace, and more.">
+  <title>Chewy — AI Image & Video Generation in Your Terminal</title>
+  <meta name="description" content="A beautiful terminal UI for AI image and video generation with Stable Diffusion, FLUX, Wan, DALL-E, Imagen, and more. Local or cloud — your choice.">
+  <meta property="og:title" content="Chewy — AI Image & Video Generation in Your Terminal">
+  <meta property="og:description" content="A beautiful terminal UI for AI image and video generation with 6 providers: local sd.cpp, OpenAI, A1111, Gemini, HuggingFace, and more.">
   <meta property="og:image" content="assets/logo.jpeg">
   <link rel="icon" href="assets/logo.jpeg">
   <style>
@@ -672,9 +672,9 @@
   <!-- Hero -->
   <section class="hero">
     <div class="container">
-      <div class="hero-badge" id="version-badge">v0.10.1 &mdash; AI prompt enhancement, starter packs, inpainting, mask painter</div>
-      <h1>AI image generation<br><span class="gradient">in your terminal.</span></h1>
-      <p>Chewy is a beautiful TUI for generating images with Stable Diffusion, FLUX, DALL-E, Imagen, and more. Run locally or connect to cloud providers &mdash; your choice.</p>
+      <div class="hero-badge" id="version-badge">v0.11.0 &mdash; Video generation (Wan 2.1), security hardening, gallery improvements</div>
+      <h1>AI image &amp; video generation<br><span class="gradient">in your terminal.</span></h1>
+      <p>Chewy is a beautiful TUI for generating images and videos with Stable Diffusion, FLUX, Wan, DALL-E, Imagen, and more. Run locally or connect to cloud providers &mdash; your choice.</p>
       <div class="hero-actions">
         <a href="#install" class="btn-primary">Get Started</a>
         <a href="https://github.com/Holy-Coders/chewy" class="btn-secondary">
@@ -763,8 +763,8 @@
         </div>
         <div class="feature-card">
           <div class="feature-icon" style="background:var(--accent-glow);color:var(--accent);">&#x1f3a8;</div>
-          <h3>SD, FLUX, DALL-E & More</h3>
-          <p>Stable Diffusion 1.x/2.x/3.5, SDXL, FLUX, DALL-E 3, GPT Image 1, Imagen 3, HiDream. Use .gguf, .safetensors, or .ckpt locally.</p>
+          <h3>SD, FLUX, Wan, DALL-E & More</h3>
+          <p>Stable Diffusion 1.x/2.x/3.5, SDXL, FLUX, Wan 2.1 video, DALL-E 3, GPT Image 1, Imagen 3, HiDream. Use .gguf, .safetensors, or .ckpt locally.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon" style="background:#8be9fd22;color:var(--cyan);">&#x1f4e5;</div>
@@ -785,6 +785,11 @@
           <div class="feature-icon" style="background:#bd93f922;color:#bd93f9;">&#x1f5bc;</div>
           <h3>AI Prompts, Inpainting, LoRAs & More</h3>
           <p>AI-powered prompt enhancement using local LLMs (ollama) or cloud APIs. Click-to-paint mask editor for face-preserving inpainting. img2img, LoRAs with adjustable weights, and prompt history.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon" style="background:#f1fa8c22;color:var(--yellow);">&#x1f3ac;</div>
+          <h3>Video Generation (Experimental)</h3>
+          <p>Generate videos with Wan 2.1 models via sd.cpp. In-terminal video player with play/pause, frame stepping, speed control, and optional MP4 export via ffmpeg.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon" style="background:#50fa7b22;color:var(--success);">&#x1f5a5;</div>
@@ -891,7 +896,7 @@
   <section class="cta">
     <div class="container">
       <h2>Start generating <span class="gradient" style="background:linear-gradient(135deg,var(--primary),var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent;">locally</span>.</h2>
-      <p>Run locally or connect to 6 cloud providers. One beautiful TUI for all your image generation needs.</p>
+      <p>Images and video, locally or via 6 cloud providers. One beautiful TUI for all your generation needs.</p>
       <div class="hero-actions">
         <a href="https://github.com/Holy-Coders/chewy" class="btn-primary">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -946,7 +951,7 @@
         if (data.tag_name) {
           var version = data.tag_name.replace(/^v/, '');
           var badge = document.getElementById('version-badge');
-          badge.textContent = 'v' + version + ' \u2014 AI prompt enhancement, starter packs, inpainting, mask painter';
+          badge.textContent = 'v' + version + ' \u2014 Video generation (Wan 2.1), security hardening, gallery improvements';
         }
       })
       .catch(function() {});

@@ -138,3 +138,16 @@ class PromptEnhanceMessage < Bubbletea::Message
   attr_reader :text, :target, :error
   def initialize(text: nil, target:, error: nil) @text = text; @target = target; @error = error end
 end
+
+class VideoGenerationDoneMessage < Bubbletea::Message
+  attr_reader :frames_dir, :frame_paths, :mp4_path, :elapsed, :stderr_output
+  def initialize(frames_dir:, frame_paths:, mp4_path: nil, elapsed:, stderr_output: "")
+    @frames_dir = frames_dir; @frame_paths = frame_paths; @mp4_path = mp4_path
+    @elapsed = elapsed; @stderr_output = stderr_output
+  end
+end
+
+class VideoFrameTickMessage < Bubbletea::Message
+  attr_reader :generation
+  def initialize(generation:) @generation = generation end
+end

@@ -93,23 +93,51 @@ def cli_list_images
   end
 
   pngs = Dir.glob(File.join(dir, "*.png")).sort.reverse
-  if pngs.empty?
-    puts "No images found in #{dir}"
+  video_dirs = Dir.glob(File.join(dir, "*_frames")).select { |d| File.directory?(d) }.sort.reverse
+
+  if pngs.empty? && video_dirs.empty?
+    puts "No images or videos found in #{dir}"
     exit 0
   end
 
   primary = cli_bold_fg(Theme.PRIMARY)
   accent = cli_fg(Theme.ACCENT)
   dim = cli_fg(Theme.TEXT_DIM)
-  puts "#{primary}Images in #{dir}\e[0m (#{pngs.length} total)\n\n"
-  pngs.each_with_index do |png, i|
+  video_style = cli_bold_fg(Theme.ACCENT)
+  total = pngs.length + video_dirs.length
+  puts "#{primary}Images in #{dir}\e[0m (#{total} total)\n\n"
+
+  idx_counter = 0
+
+  # List videos first
+  video_dirs.each do |vdir|
+    idx_counter += 1
+    json = File.join(vdir, "video.json")
+    meta = File.exist?(json) ? (JSON.parse(File.read(json)) rescue {}) : {}
+    prompt = (meta["prompt"] || "")[0, 60]
+    model = meta["model"] ? File.basename(meta["model"]) : nil
+    frame_count = meta["frame_count"] || Dir.glob(File.join(vdir, "*.png")).length
+    fps = meta["fps"] || 24
+    mp4 = Dir.glob(File.join(vdir, "*.mp4")).first
+
+    idx = "#{primary}#{idx_counter}.\e[0m"
+    name = "#{video_style}[VIDEO]\e[0m \e[1m#{File.basename(vdir)}\e[0m"
+    details = ["#{frame_count} frames", "#{fps} fps", model, mp4 ? "mp4" : nil].compact.join(" | ")
+    puts "  #{idx} #{name}"
+    puts "     #{prompt}" unless prompt.empty?
+    puts "     #{dim}#{details}\e[0m" unless details.empty?
+    puts ""
+  end
+
+  pngs.each do |png|
+    idx_counter += 1
     json = png.sub(/\.png$/, ".json")
     meta = File.exist?(json) ? (JSON.parse(File.read(json)) rescue {}) : {}
     prompt = (meta["prompt"] || "")[0, 60]
     model = meta["model"] ? File.basename(meta["model"]) : nil
     seed = meta["seed"]
 
-    idx = "#{primary}#{i + 1}.\e[0m"
+    idx = "#{primary}#{idx_counter}.\e[0m"
     name = "\e[1m#{File.basename(png)}\e[0m"
     details = [model, seed ? "seed:#{seed}" : nil].compact.join(" | ")
     puts "  #{idx} #{name}"
@@ -122,23 +150,39 @@ end
 def cli_delete_image(target)
   cli_load_theme
   dir = cli_output_dir
-  # Allow bare filename or full path
-  path = File.exist?(target) ? target : File.join(dir, target)
+  # Resolve path — bare filename is joined with output dir
+  path = File.expand_path(target.include?("/") ? target : File.join(dir, target))
 
-  unless File.exist?(path)
+  # Validate path is within the output directory to prevent path traversal
+  output_real = File.realpath(dir) rescue File.expand_path(dir)
+  path_real = File.realpath(path) rescue path
+  unless path_real.start_with?(output_real + "/") || path_real == output_real
+    puts "#{cli_fg(Theme.ERROR)}Path must be within output directory:\e[0m #{dir}"
+    exit 1
+  end
+
+  # Check if target is a video frames directory
+  is_video_dir = File.directory?(path) && path.end_with?("_frames")
+
+  unless File.exist?(path) || is_video_dir
     puts "#{cli_fg(Theme.ERROR)}File not found:\e[0m #{target}"
     exit 1
   end
 
-  json = path.sub(/\.png$/, ".json")
-  print "Delete #{File.basename(path)}? [y/N] "
+  label = is_video_dir ? "[VIDEO] #{File.basename(path)}" : File.basename(path)
+  print "Delete #{label}? [y/N] "
   answer = $stdin.gets&.strip&.downcase
   unless answer == "y"
     puts "Cancelled."
     exit 0
   end
 
-  File.delete(path) if File.exist?(path)
-  File.delete(json) if File.exist?(json)
-  puts "#{cli_fg(Theme.SUCCESS)}Deleted\e[0m #{File.basename(path)}"
+  if is_video_dir
+    FileUtils.rm_rf(path)
+  else
+    json = path.sub(/\.png$/, ".json")
+    File.delete(path) if File.exist?(path)
+    File.delete(json) if File.exist?(json)
+  end
+  puts "#{cli_fg(Theme.SUCCESS)}Deleted\e[0m #{label}"
 end

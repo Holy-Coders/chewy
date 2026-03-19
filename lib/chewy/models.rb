@@ -7,7 +7,8 @@ class Chewy
     def scan_models
       Dir.glob(File.join(@models_dir, "**", "*.part")).each { |f| File.delete(f) rescue nil }
 
-      companion_names = FLUX_COMPANION_FILES.values.map { |v| v[:filename] }
+      companion_names = FLUX_COMPANION_FILES.values.map { |v| v[:filename] } +
+                        WAN_COMPANION_FILES.values.map { |v| v[:filename] }
       ext_glob = "*.{safetensors,gguf,ckpt}"
 
       # Scan primary dir + any extra app directories that exist
@@ -93,7 +94,9 @@ class Chewy
       end
       # Guess from filename
       name = File.basename(path).downcase
-      type = if name.include?("flux")
+      type = if name.include?("wan2") || name.include?("wan-") || name.include?("wan_")
+        "Wan"
+      elsif name.include?("flux")
         "FLUX"
       elsif name.include?("sdxl") || name.include?("sd_xl")
         "SDXL"
@@ -131,7 +134,9 @@ class Chewy
             output << chunk
             # Check for version detection
             if output.include?("Version:")
-              type = if output.include?("Version: Flux")
+              type = if output.include?("Version: Wan") || output.include?("Version: wan")
+                "Wan"
+              elsif output.include?("Version: Flux")
                 "FLUX"
               elsif output.include?("Version: SDXL")
                 "SDXL"
@@ -191,7 +196,9 @@ class Chewy
       return @model_types[path] if @model_types[path]
       # Guess from filename
       name = File.basename(path).downcase
-      if name.include?("flux")
+      if name.include?("wan2") || name.include?("wan-") || name.include?("wan_")
+        "Wan"
+      elsif name.include?("flux")
         "FLUX"
       elsif name.include?("sdxl") || name.include?("sd_xl")
         "SDXL"
@@ -219,6 +226,46 @@ class Chewy
       return false unless path
       basename = File.basename(path).downcase
       basename.include?("flux")
+    end
+
+    def wan_model?(path)
+      return false unless path
+      basename = File.basename(path).downcase
+      basename.include?("wan2") || basename.include?("wan-") || basename.include?("wan_")
+    end
+
+    def wan_companion_path(key)
+      info = WAN_COMPANION_FILES[key]
+      return nil unless info
+      File.join(@models_dir, info[:filename])
+    end
+
+    def wan_companions_present?
+      WAN_COMPANION_FILES.all? { |key, _| File.exist?(wan_companion_path(key)) }
+    end
+
+    def missing_wan_companions
+      WAN_COMPANION_FILES.select { |key, _| !File.exist?(wan_companion_path(key)) }
+    end
+
+    def download_wan_companions
+      missing = missing_wan_companions
+      return [self, nil] if missing.empty?
+
+      hf_token = resolve_hf_token
+      unless hf_token
+        @hf_token_pending_action = :wan_companions
+        return open_overlay(:hf_token)
+      end
+
+      @companion_downloading = true
+      @companion_remaining = missing.size
+      @companion_errors = []
+      @companion_current_file = ""
+      @companion_dest = nil
+
+      queue = missing.to_a
+      start_next_companion_download(queue, hf_token)
     end
 
     def flux_companion_path(key)
@@ -250,6 +297,7 @@ class Chewy
       dir = File.dirname(HF_TOKEN_PATHS.first)
       FileUtils.mkdir_p(dir)
       File.write(HF_TOKEN_PATHS.first, token)
+      File.chmod(0600, HF_TOKEN_PATHS.first)
     end
 
     def download_flux_companions
@@ -279,7 +327,7 @@ class Chewy
         @companion_current_file = ""
         @companion_dest = nil
         if @companion_errors.empty?
-          return [self, set_status_toast("FLUX companion files ready")]
+          return [self, set_status_toast("Companion files ready")]
         else
           return [self, set_error_toast("Some downloads failed: #{@companion_errors.join(', ')}")]
         end
@@ -296,16 +344,23 @@ class Chewy
       @companion_download_size = 0
 
       cmd = Proc.new do
-        # First get file size via HEAD request
-        size_out, _ = Open3.capture2("curl", "-sI", "-L", url, "-H", "Authorization: Bearer #{hf_token}")
-        content_length = size_out[/content-length:\s*(\d+)/i, 1]&.to_i || 0
+        # First get file size via HEAD request (grab last content-length after redirects)
+        head_args = ["curl", "-sI", "-L", url]
+        head_args += ["-H", "Authorization: Bearer #{hf_token}"] if hf_token && !hf_token.empty?
+        size_out, _ = Open3.capture2(*head_args)
+        content_length = size_out.scan(/content-length:\s*(\d+)/i).flatten.last&.to_i || 0
         @companion_download_size = content_length
 
-        curl_args = ["curl", "-fL", "-o", part, "-sS",
-                     "-C", "-", "--retry", "3", "--retry-delay", "2", "--retry-all-errors",
-                     "-H", "Authorization: Bearer #{hf_token}", url]
-        _out, err, st = Open3.capture3(*curl_args)
-        if st.success?
+        # Download — try without auth first (public repos), fall back to auth if needed
+        curl_base = ["curl", "-fL", "-o", part, "-sS",
+                     "-C", "-", "--retry", "3", "--retry-delay", "2", "--retry-all-errors"]
+        _out, err, st = Open3.capture3(*curl_base, url)
+        unless st.success?
+          # Retry with auth token for gated repos
+          File.delete(part) if File.exist?(part)
+          _out, err, st = Open3.capture3(*curl_base, "-H", "Authorization: Bearer #{hf_token}", url)
+        end
+        if st.success? && File.exist?(part) && File.size(part) > 0
           File.rename(part, dest)
           CompanionDownloadDoneMessage.new(name: name)
         else
@@ -325,6 +380,7 @@ class Chewy
     def select_model_by_type(type)
       return unless File.directory?(@models_dir)
       pattern = case type
+      when "wan" then /wan2|wan[_\-]/i
       when "flux" then /flux/i
       when "sdxl" then /sdxl|sd_xl/i
       when "sd3" then /sd3/i

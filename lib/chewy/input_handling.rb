@@ -390,6 +390,12 @@ class Chewy
         @params[key] = new_val.to_f.clamp(0.01, 1.0)
       elsif key == :guidance
         @params[key] = new_val.to_f.clamp(1.0, 30.0)
+      elsif key == :video_frames
+        # Wan requires 1+4n frames (1, 5, 9, 13, 17, 21, 25, 29, 33, ...)
+        clamped = new_val.clamp(1, 81)
+        @params[key] = ((clamped - 1) / 4.0).round * 4 + 1
+      elsif key == :fps
+        @params[key] = new_val.clamp(1, 60)
       elsif key == :threads
         @params[key] = new_val.clamp(1, Etc.nprocessors)
       elsif new_val > 0
@@ -436,10 +442,11 @@ class Chewy
 
         if RUBY_PLATFORM.include?("darwin")
           # macOS: use osascript to extract clipboard image as PNG
+          escaped_dest = dest.gsub("\\", "\\\\\\\\").gsub('"', '\\\\"')
           script = <<~APPLESCRIPT
             try
               set imgData to the clipboard as «class PNGf»
-              set filePath to POSIX file "#{dest}"
+              set filePath to POSIX file "#{escaped_dest}"
               set fileRef to open for access filePath with write permission
               write imgData to fileRef
               close access fileRef

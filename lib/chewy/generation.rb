@@ -20,10 +20,13 @@ class Chewy
         end
       end
 
-      # ControlNet is not supported with FLUX models
+      # ControlNet is not supported with FLUX or Wan models
       if @controlnet_model_path && @provider.provider_type == :local && @selected_model_path
         if flux_model?(@selected_model_path)
           return [self, set_error_toast("ControlNet is not supported with FLUX models — use SD 1.5, SD 2.x, or SDXL")]
+        end
+        if wan_model?(@selected_model_path)
+          return [self, set_error_toast("ControlNet is not supported with Wan video models")]
         end
       end
 
@@ -35,8 +38,9 @@ class Chewy
       if @provider.provider_type == :local && @selected_model_path && !@confirm_low_memory
         model_size = File.size(@selected_model_path) rescue 0
         available_mem = estimate_available_memory
-        # Model needs roughly 1.5x its file size in RAM (weights + workspace)
-        estimated_need = (model_size * 1.5).to_i
+        # Model needs roughly 1.5x its file size in RAM (2x for video models)
+        mem_multiplier = wan_model?(@selected_model_path) ? 2.0 : 1.5
+        estimated_need = (model_size * mem_multiplier).to_i
         if available_mem > 0 && estimated_need > available_mem
           model_gb = (model_size / 1_073_741_824.0).round(1)
           avail_gb = (available_mem / 1_073_741_824.0).round(1)
@@ -69,6 +73,9 @@ class Chewy
         if flux_model?(@selected_model_path) && !flux_companions_present?
           return download_flux_companions
         end
+        if wan_model?(@selected_model_path) && !wan_companions_present?
+          return download_wan_companions
+        end
       elsif @provider.needs_api_key? && !@provider.api_key_set?
         return open_overlay(:api_key)
       end
@@ -82,6 +89,8 @@ class Chewy
       @reveal_phase = nil; @reveal_path = nil
       @gen_current_batch = 0
       @gen_total_batch = @params[:batch]
+      @gen_video_frame = nil
+      @gen_video_frame_total = nil
       @last_seed = nil
       @error_message = nil; @status_message = nil
 
@@ -108,13 +117,18 @@ class Chewy
         @remote_model_id || @provider.list_models.first&.dig(:id)
       end
       is_flux = @provider.provider_type == :local && @selected_model_path && flux_model?(@selected_model_path)
+      is_wan = @provider.provider_type == :local && @selected_model_path && wan_model?(@selected_model_path)
+
+      if is_wan
+        @gen_status = "Video generation is experimental — works best with dedicated GPU hardware"
+      end
 
       request = Provider::GenerationRequest.new(
         prompt: full_prompt, negative_prompt: negative_text,
         model: model, steps: @params[:steps], cfg_scale: @params[:cfg_scale],
         width: @params[:width], height: @params[:height],
         seed: @params[:seed], sampler: @sampler, scheduler: @scheduler,
-        batch: @params[:batch], init_image: @init_image_path,
+        batch: is_wan ? 1 : @params[:batch], init_image: @init_image_path,
         strength: @params[:strength], threads: @params[:threads],
         loras: @selected_loras, output_dir: @output_dir,
         is_flux: is_flux,
@@ -122,11 +136,18 @@ class Chewy
         flux_clip_l: is_flux ? flux_companion_path("clip_l") : nil,
         flux_t5xxl: is_flux ? flux_companion_path("t5xxl") : nil,
         flux_vae: is_flux ? flux_companion_path("vae") : nil,
-        controlnet_model: @controlnet_model_path,
-        controlnet_image: @controlnet_image_path,
+        controlnet_model: is_wan ? nil : @controlnet_model_path,
+        controlnet_image: is_wan ? nil : @controlnet_image_path,
         controlnet_strength: @controlnet_strength,
         controlnet_canny: @controlnet_canny,
-        mask_image: @mask_image_path,
+        mask_image: is_wan ? nil : @mask_image_path,
+        video_mode: is_wan,
+        video_frames: is_wan ? @params[:video_frames] : nil,
+        fps: is_wan ? @params[:fps] : nil,
+        is_wan: is_wan,
+        wan_t5xxl: is_wan ? wan_companion_path("t5xxl") : nil,
+        wan_clip_vision: is_wan ? wan_companion_path("clip_vision") : nil,
+        wan_vae: is_wan ? wan_companion_path("vae") : nil,
       )
 
       sidecar_base = {
@@ -136,7 +157,15 @@ class Chewy
         "sampler" => @sampler, "scheduler" => @scheduler,
         "provider" => @provider.id, "provider_name" => @provider.display_name,
       }
-      sidecar_base["model_type"] = is_flux ? "flux" : "sd" if @provider.provider_type == :local
+      if @provider.provider_type == :local
+        sidecar_base["model_type"] = is_wan ? "wan" : (is_flux ? "flux" : "sd")
+      end
+      if is_wan
+        sidecar_base["type"] = "video"
+        sidecar_base["video_frames"] = @params[:video_frames]
+        sidecar_base["fps"] = @params[:fps]
+        sidecar_base["duration"] = (@params[:video_frames].to_f / (@params[:fps] || 24)).round(2)
+      end
       sidecar_base["init_image"] = @init_image_path if @init_image_path
       sidecar_base["strength"] = @params[:strength] if @init_image_path
       if @controlnet_model_path
@@ -166,6 +195,8 @@ class Chewy
             @gen_sampling_start = Time.now
             @gen_step = 0; @gen_total_steps = 0
           when :batch_progress then @gen_current_batch = data
+          when :video_frame_progress
+            @gen_video_frame = data[:frame]; @gen_video_frame_total = data[:total]
           end
         end
 
@@ -177,6 +208,27 @@ class Chewy
           GenerationErrorMessage.new(error: "Cancelled", stderr_output: "")
         elsif result.error
           GenerationErrorMessage.new(error: result.error, stderr_output: "")
+        elsif result.video_frame_paths&.any?
+          # Video generation completed
+          @last_seed = result.seeds&.last
+          elapsed = (Time.now - total_start).round(1)
+          # Write sidecar for the video
+          sidecar_path = File.join(result.video_frames_dir, "video.json")
+          unless File.exist?(sidecar_path)
+            sidecar = sidecar_base.merge(
+              "seed" => result.seeds&.first,
+              "timestamp" => Time.now.iso8601,
+              "generation_time_seconds" => result.elapsed,
+              "frame_count" => result.video_frame_paths.length,
+            )
+            File.write(sidecar_path, JSON.pretty_generate(sidecar))
+          end
+          VideoGenerationDoneMessage.new(
+            frames_dir: result.video_frames_dir,
+            frame_paths: result.video_frame_paths,
+            elapsed: elapsed,
+            stderr_output: ""
+          )
         elsif result.paths&.any?
           @last_seed = result.seeds&.last
           result.paths.each_with_index do |path, i|

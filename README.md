@@ -5,7 +5,7 @@
 <h1 align="center">Chewy</h1>
 
 <p align="center">
-  A terminal UI for AI image generation with Stable Diffusion, FLUX, DALL-E, Imagen, and more.
+  A terminal UI for AI image and video generation with Stable Diffusion, FLUX, Wan, DALL-E, Imagen, and more.
 </p>
 
 <p align="center">
@@ -54,7 +54,7 @@ Chewy supports 6 image generation backends. Press `^y` to switch providers.
 
 | Provider | Models | Type |
 |----------|--------|------|
-| **Local (sd.cpp)** | SD 1.x/2.x/3.5, SDXL, FLUX (.gguf/.safetensors/.ckpt) | Local |
+| **Local (sd.cpp)** | SD 1.x/2.x/3.5, SDXL, FLUX, Wan Video (.gguf/.safetensors/.ckpt) | Local |
 | **OpenAI** | GPT Image 1, DALL-E 3, DALL-E 2 | API |
 | **Gemini** | Imagen 3, Imagen 3 Fast, Gemini 2.0 Flash | API |
 | **HuggingFace** | FLUX.1 Schnell/Dev, SDXL, SD 3.5 Large, HiDream | API |
@@ -104,6 +104,14 @@ Press `^d` inside chewy to browse recommended starter models or search HuggingFa
 ### FLUX models
 
 FLUX models require companion files (clip_l, t5xxl, vae). Chewy will automatically download these when you first try to generate with a FLUX model. You'll need a [HuggingFace token](https://huggingface.co/settings/tokens) with read access.
+
+### Video Generation (Experimental)
+
+Chewy supports video generation via Wan 2.1 models using sd.cpp's `-M vid_gen` mode. Select a Wan model and Chewy will show a VIDEO badge, add Frames/FPS parameters, and output frame sequences with an in-terminal video player.
+
+**Note:** Video generation is experimental and works best with dedicated GPU hardware. The Wan 1.3B model requires ~12GB RAM just for weights, plus additional memory for video frame generation. CPU-only generation is very slow (minutes per frame). Companion files (t5xxl, clip_vision, vae) are auto-downloaded on first use.
+
+Video presets are available under `^p`: Quick Preview, Standard, High Quality, and Img2Vid.
 
 ### LoRAs
 
@@ -206,9 +214,9 @@ cp bin/sd-cli /usr/local/bin/sd
 
 ### Project structure
 
-This is a single-file app:
-
-- `chewy.rb` — the entire TUI application
+- `chewy.rb` — entrypoint (CLI routing + app launch)
+- `lib/chewy.rb` — main Chewy class (init, update, view)
+- `lib/chewy/*.rb` — 16 modules mixed into the Chewy class
 - `Gemfile` / `Gemfile.lock` — Ruby dependencies
 - `VERSION` — semver, read at runtime and used by CI for releases
 - `Formula/` — Homebrew formulas (sd-cpp and chewy)
