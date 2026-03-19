@@ -33,7 +33,12 @@ EXTRA_MODEL_DIRS = [
 ].freeze
 SAMPLER_OPTIONS = %w[euler euler_a heun dpm2 dpm++2s_a dpm++2m dpm++2mv2 ipndm ipndm_v lcm ddim_trailing tcd res_multistep res_2s].freeze
 SCHEDULER_OPTIONS = %w[discrete karras exponential ays gits sgm_uniform simple smoothstep kl_optimal].freeze
-CONFIG_DIR = File.expand_path("~/.config/sdtui")
+OLD_CONFIG_DIR = File.expand_path("~/.config/sdtui")
+CONFIG_DIR = File.expand_path("~/.config/chewy")
+# Migrate from old config dir if new one doesn't exist yet
+if !File.directory?(CONFIG_DIR) && File.directory?(OLD_CONFIG_DIR)
+  FileUtils.cp_r(OLD_CONFIG_DIR, CONFIG_DIR)
+end
 CONFIG_PATH = File.join(CONFIG_DIR, "config.yml")
 PRESETS_PATH = File.join(CONFIG_DIR, "presets.yml")
 
@@ -1508,7 +1513,7 @@ class Chewy
     @kitty_overlay_pending = nil  # {path:, row:, col:, w:, h:, slot:} set during view, processed after lipgloss
 
     # Models
-    @models_dir = File.expand_path(ENV["CHEWY_MODELS_DIR"] || @config["model_dir"] || "~/models")
+    @models_dir = File.expand_path(ENV["CHEWY_MODELS_DIR"] || @config["model_dir"] || "~/.config/chewy/models")
     @selected_model_path = nil
     @model_list = nil
     @model_paths = []
@@ -1575,8 +1580,8 @@ class Chewy
     # Paths
     bundled_sd = File.join(__dir__, "bin", "sd")
     @sd_bin = ENV["SD_BIN"] || @config["sd_bin"] || (File.executable?(bundled_sd) ? bundled_sd : "sd")
-    @output_dir = File.expand_path(ENV["CHEWY_OUTPUT_DIR"] || @config["output_dir"] || "outputs")
-    @lora_dir = File.expand_path(ENV["CHEWY_LORA_DIR"] || @config["lora_dir"] || "~/loras")
+    @output_dir = File.expand_path(ENV["CHEWY_OUTPUT_DIR"] || @config["output_dir"] || "~/.config/chewy/outputs")
+    @lora_dir = File.expand_path(ENV["CHEWY_LORA_DIR"] || @config["lora_dir"] || "~/.config/chewy/loras")
 
     # Providers
     @providers = build_providers
@@ -1727,10 +1732,10 @@ class Chewy
   def save_config
     FileUtils.mkdir_p(CONFIG_DIR)
     data = {
-      "model_dir" => @models_dir || File.expand_path("~/models"),
-      "output_dir" => @output_dir || "outputs",
+      "model_dir" => @models_dir || File.expand_path("~/.config/chewy/models"),
+      "output_dir" => @output_dir || "~/.config/chewy/outputs",
       "sd_bin" => @sd_bin || "sd",
-      "lora_dir" => @lora_dir || File.expand_path("~/loras"),
+      "lora_dir" => @lora_dir || File.expand_path("~/.config/chewy/loras"),
       "default_steps" => @params&.dig(:steps) || 20,
       "default_cfg" => @params&.dig(:cfg_scale) || 7.0,
       "default_width" => @params&.dig(:width) || 512,
@@ -2663,7 +2668,7 @@ class Chewy
   # ========== Prompt History ==========
 
   def load_prompt_history_from_disk
-    dir = File.expand_path(ENV["CHEWY_OUTPUT_DIR"] || @config["output_dir"] || "outputs")
+    dir = File.expand_path(ENV["CHEWY_OUTPUT_DIR"] || @config["output_dir"] || "~/.config/chewy/outputs")
     return [] unless File.directory?(dir)
 
     jsons = Dir.glob(File.join(dir, "*.json")).sort # oldest first
@@ -4464,7 +4469,7 @@ class Chewy
     @file_picker_dir = if @controlnet_model_path
       File.dirname(@controlnet_model_path)
     else
-      @models_dir || File.expand_path("~/models")
+      @models_dir || File.expand_path("~/.config/chewy/models")
     end
     scan_file_picker_dir
     [self, nil]
@@ -6986,7 +6991,7 @@ class Chewy
     lines << ""
     lines << "Key: #{@api_key_input.view}"
     lines << ""
-    lines << dim.render("Saved to ~/.config/sdtui/keys/ (chmod 600)")
+    lines << dim.render("Saved to ~/.config/chewy/keys/ (chmod 600)")
     lines << ""
     lines << dim.render("You can also set ") + accent.render(prov.api_key_env_var) + dim.render(" in your shell instead.")
     lines.join("\n")
@@ -7194,7 +7199,7 @@ end
 
 def cli_output_dir
   config = File.exist?(CONFIG_PATH) ? (YAML.safe_load(File.read(CONFIG_PATH)) || {}) : {}
-  File.expand_path(ENV["CHEWY_OUTPUT_DIR"] || config["output_dir"] || "outputs")
+  File.expand_path(ENV["CHEWY_OUTPUT_DIR"] || config["output_dir"] || "~/.config/chewy/outputs")
 end
 
 def cli_list_images
