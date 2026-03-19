@@ -142,6 +142,7 @@ class Chewy
         return delete_selected_model
       end
 
+      @confirm_delete_model = nil  # reset confirmation on any non-delete key
       @model_list, cmd = @model_list.update(message)
       [self, cmd]
     end
@@ -178,6 +179,14 @@ class Chewy
 
       path = @model_paths[idx]
       return [self, nil] unless File.exist?(path)
+
+      unless @confirm_delete_model
+        @confirm_delete_model = path
+        return [self, set_error_toast("Delete #{File.basename(path)}? Press delete again to confirm")]
+      end
+
+      return [self, nil] unless @confirm_delete_model == path
+      @confirm_delete_model = nil
 
       size = File.size(path)
       File.delete(path)
@@ -228,13 +237,18 @@ class Chewy
       return unless File.directory?(@output_dir)
 
       pngs = Dir.glob(File.join(@output_dir, "*.png")).sort.reverse
-      @gallery_images = pngs.first(200).map do |png|
-        json = png.sub(/\.png$/, ".json")
-        meta = File.exist?(json) ? (JSON.parse(File.read(json)) rescue {}) : {}
-        { path: png, meta: meta }
+      @gallery_images = pngs.first(100).map do |png|
+        { path: png, meta: nil }  # lazy-loaded on demand
       end
       @gallery_index = 0
       @gallery_thumb_cache = {}
+    end
+
+    def gallery_meta(entry)
+      return entry[:meta] if entry[:meta]
+      json = entry[:path].sub(/\.png$/, ".json")
+      entry[:meta] = File.exist?(json) ? (JSON.parse(File.read(json)) rescue {}) : {}
+      entry[:meta]
     end
 
     GALLERY_DEBOUNCE = 0.15
@@ -280,6 +294,8 @@ class Chewy
       return close_overlay if key == "esc" || key == "q"
       return [self, nil] if @gallery_images.empty?
 
+      @confirm_delete_gallery = nil unless key == "delete" || key == "backspace"
+
       nav_cmd = nil
       case key
       when "up", "k"
@@ -303,7 +319,8 @@ class Chewy
         delete_gallery_image
       when "p"
         entry = @gallery_images[@gallery_index]
-        load_from_history(entry[:meta]) if entry[:meta] && !entry[:meta].empty?
+        meta = gallery_meta(entry)
+        load_from_history(meta) if meta && !meta.empty?
         return close_overlay
       end
       [self, nav_cmd]
@@ -311,8 +328,16 @@ class Chewy
 
     def delete_gallery_image
       return if @gallery_images.empty?
-
       entry = @gallery_images[@gallery_index]
+
+      unless @confirm_delete_gallery
+        @confirm_delete_gallery = entry[:path]
+        return [self, set_error_toast("Delete #{File.basename(entry[:path])}? Press delete again to confirm")]
+      end
+
+      return if @confirm_delete_gallery != entry[:path]
+      @confirm_delete_gallery = nil
+
       File.delete(entry[:path]) if File.exist?(entry[:path])
       json = entry[:path].sub(/\.png$/, ".json")
       File.delete(json) if File.exist?(json)

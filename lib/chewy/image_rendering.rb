@@ -478,6 +478,22 @@ class Chewy
       [total - 2, 1].max
     end
 
+    # Estimate available disk space in bytes for a given directory
+    def estimate_available_disk_space(dir)
+      if RUBY_PLATFORM.include?("darwin")
+        output = `df -k "#{dir}" 2>/dev/null`
+        # Second line, 4th column is available KB
+        available_kb = output.lines[1]&.split&.[](3)&.to_i || 0
+        available_kb * 1024
+      else
+        output = `df -k "#{dir}" 2>/dev/null`
+        available_kb = output.lines[1]&.split&.[](3)&.to_i || 0
+        available_kb * 1024
+      end
+    rescue
+      0
+    end
+
     # Estimate available system memory in bytes
     def estimate_available_memory
       if RUBY_PLATFORM.include?("darwin")

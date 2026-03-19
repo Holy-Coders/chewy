@@ -253,6 +253,10 @@ class Chewy
     @preset_name_buffer = ""
     @confirm_delete_preset = false
 
+    # Confirmation flags for destructive actions
+    @confirm_delete_model = nil
+    @confirm_delete_gallery = nil
+
     # Best-settings confirmation after model selection / img2img
     @confirm_apply_best_settings = false
     @pending_best_settings_type = nil
@@ -297,6 +301,12 @@ class Chewy
   def init
     scan_models
     scan_loras
+    # Clean orphan mask files (older than 1 day)
+    Dir.glob(File.join(@output_dir, ".mask_*.png")).each do |f|
+      File.delete(f) if (Time.now - File.mtime(f)) > 86400
+    rescue
+      nil
+    end
     update_param_keys
     _spinner, spinner_cmd = @spinner.init
     splash_cmd = Bubbletea.tick(0.4) { SplashTickMessage.new(phase: 1) }

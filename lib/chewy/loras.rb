@@ -6,6 +6,7 @@ class Chewy
 
     def scan_loras
       return unless File.directory?(@lora_dir)
+      Dir.glob(File.join(@lora_dir, "**", "*.part")).each { |f| File.delete(f) rescue nil }
       pattern = File.join(@lora_dir, "**", "*.safetensors")
       all_loras = Dir.glob(pattern).map do |f|
         name = File.basename(f, ".safetensors")

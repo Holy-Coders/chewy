@@ -238,7 +238,7 @@ class Chewy
       dir = File.expand_path(ENV["CHEWY_OUTPUT_DIR"] || @config["output_dir"] || "~/.config/chewy/outputs")
       return [] unless File.directory?(dir)
 
-      jsons = Dir.glob(File.join(dir, "*.json")).sort # oldest first
+      jsons = Dir.glob(File.join(dir, "*.json")).sort_by { |f| File.mtime(f) rescue Time.at(0) }.last(100)
       prompts = jsons.filter_map do |f|
         data = JSON.parse(File.read(f)) rescue next
         p = data["prompt"]&.strip

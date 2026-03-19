@@ -347,7 +347,7 @@ class Chewy
 
       # -- Left: image list --
       entry = @gallery_images[@gallery_index]
-      meta = entry[:meta]
+      meta = gallery_meta(entry)
 
       visible = inner_h - 2
       half = visible / 2
@@ -363,7 +363,7 @@ class Chewy
         next nil if i < scroll_offset || i >= scroll_offset + visible
 
         fname = File.basename(img[:path], ".png")
-        prompt = (img[:meta]["prompt"] || "")[0, list_w - 6]
+        prompt = (gallery_meta(img)["prompt"] || "")[0, list_w - 6]
         label = prompt.empty? ? fname : prompt
         if i == @gallery_index
           sel_style.render("> #{label}")

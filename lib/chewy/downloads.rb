@@ -196,6 +196,11 @@ class Chewy
     end
 
     def start_model_download(repo_id, filename, size)
+      # Check disk space before downloading
+      disk_free = estimate_available_disk_space(@models_dir)
+      if disk_free > 0 && size.to_i > 0 && size.to_i > disk_free - 500_000_000
+        return set_error_toast("Not enough disk space (#{format_bytes(disk_free)} free, need #{format_bytes(size)})")
+      end
       FileUtils.mkdir_p(@models_dir)
       dest = File.join(@models_dir, filename); part = "#{dest}.part"
       @model_downloading = true; @download_dest = part
@@ -395,6 +400,11 @@ class Chewy
     end
 
     def start_civitai_download(filename, url, size)
+      # Check disk space before downloading
+      disk_free = estimate_available_disk_space(@models_dir)
+      if disk_free > 0 && size.to_i > 0 && size.to_i > disk_free - 500_000_000
+        return set_error_toast("Not enough disk space (#{format_bytes(disk_free)} free, need #{format_bytes(size)})")
+      end
       FileUtils.mkdir_p(@models_dir)
       dest = File.join(@models_dir, filename); part = "#{dest}.part"
       @model_downloading = true; @download_dest = part
@@ -548,6 +558,11 @@ class Chewy
     end
 
     def start_lora_download(repo_id, filename, size)
+      # Check disk space before downloading
+      disk_free = estimate_available_disk_space(@lora_dir)
+      if disk_free > 0 && size.to_i > 0 && size.to_i > disk_free - 500_000_000
+        return set_error_toast("Not enough disk space (#{format_bytes(disk_free)} free, need #{format_bytes(size)})")
+      end
       FileUtils.mkdir_p(@lora_dir)
       dest = File.join(@lora_dir, File.basename(filename)); part = "#{dest}.part"
       @lora_downloading = true; @lora_download_dest = part
@@ -589,6 +604,11 @@ class Chewy
     end
 
     def start_lora_civitai_download(filename, url, size)
+      # Check disk space before downloading
+      disk_free = estimate_available_disk_space(@lora_dir)
+      if disk_free > 0 && size.to_i > 0 && size.to_i > disk_free - 500_000_000
+        return set_error_toast("Not enough disk space (#{format_bytes(disk_free)} free, need #{format_bytes(size)})")
+      end
       FileUtils.mkdir_p(@lora_dir)
       dest = File.join(@lora_dir, filename); part = "#{dest}.part"
       @lora_downloading = true; @lora_download_dest = part
@@ -824,6 +844,11 @@ class Chewy
     end
 
     def start_controlnet_download(repo_id, hf_filename, local_filename, size)
+      # Check disk space before downloading
+      disk_free = estimate_available_disk_space(@models_dir)
+      if disk_free > 0 && size.to_i > 0 && size.to_i > disk_free - 500_000_000
+        return set_error_toast("Not enough disk space (#{format_bytes(disk_free)} free, need #{format_bytes(size)})")
+      end
       FileUtils.mkdir_p(@models_dir)
       dest = File.join(@models_dir, local_filename); part = "#{dest}.part"
       @model_downloading = true; @download_dest = part
@@ -924,6 +949,14 @@ class Chewy
                  when :model, :controlnet then @models_dir
                  when :lora then @lora_dir
                  end
+      # Check disk space before downloading
+      disk_free = estimate_available_disk_space(dest_dir)
+      item_size = item[:size].to_i
+      if disk_free > 0 && item_size > 0 && item_size > disk_free - 500_000_000
+        @starter_pack_errors << "#{File.basename(item[:file])}: not enough disk space"
+        @starter_pack_completed += 1
+        return start_next_starter_pack_item
+      end
       FileUtils.mkdir_p(dest_dir)
 
       filename = File.basename(item[:file])
