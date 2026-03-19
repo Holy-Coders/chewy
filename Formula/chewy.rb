@@ -20,6 +20,7 @@ class Chewy < Formula
     system "gem", "install", "base64", "--no-document", "--install-dir", libexec
 
     libexec.install "chewy.rb"
+    libexec.install "lib"
     libexec.install "Gemfile"
     libexec.install "Gemfile.lock"
     libexec.install "logo.png"
