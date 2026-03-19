@@ -941,9 +941,12 @@ class Chewy
         return [self, nil]
       end
 
+      @starter_pack_selected ||= []
+
       case key
       when "esc", "q", "s"
         @overlay = nil
+        @starter_pack_selected = []
         case @focus
         when FOCUS_PROMPT then @prompt_input.focus
         when FOCUS_NEGATIVE then @negative_input.focus
@@ -953,8 +956,20 @@ class Chewy
         @starter_pack_index = (@starter_pack_index - 1) % STARTER_PACKS.length
       when "down", "j"
         @starter_pack_index = (@starter_pack_index + 1) % STARTER_PACKS.length
+      when " "
+        # Toggle selection
+        if @starter_pack_selected.include?(@starter_pack_index)
+          @starter_pack_selected.delete(@starter_pack_index)
+        else
+          @starter_pack_selected << @starter_pack_index
+        end
       when "enter"
-        return start_starter_pack_download(@starter_pack_index)
+        if @starter_pack_selected.empty?
+          # Nothing toggled — download the highlighted one
+          return start_starter_pack_download_multi([@starter_pack_index])
+        else
+          return start_starter_pack_download_multi(@starter_pack_selected)
+        end
       end
       [self, nil]
     end

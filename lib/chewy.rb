@@ -272,6 +272,7 @@ class Chewy
 
     # Starter pack
     @starter_pack_index = 0
+    @starter_pack_selected = []
     @starter_pack_downloading = false
     @starter_pack_queue = []
     @starter_pack_total = 0

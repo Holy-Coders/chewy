@@ -19,10 +19,12 @@ class Chewy
     end
 
     def build_recommended_list
-      items = PRELOADED_MODELS.map do |m|
+      items = []
+      items << { title: "Starter Packs...", description: "Curated bundles — models, LoRAs, ControlNet in one click" }
+      PRELOADED_MODELS.each do |m|
         already = File.exist?(File.join(@models_dir, m[:file]))
         status = already ? " (installed)" : ""
-        { title: "#{m[:name]}#{status}", description: "#{m[:type]} | #{format_bytes(m[:size])} \u2014 #{m[:desc]}" }
+        items << { title: "#{m[:name]}#{status}", description: "#{m[:type]} | #{format_bytes(m[:size])} \u2014 #{m[:desc]}" }
       end
       items << { title: "Browse HuggingFace...", description: "Search HuggingFace for GGUF and safetensors models" }
       items << { title: "Browse CivitAI...", description: "Search CivitAI for community models and checkpoints" }
@@ -273,14 +275,21 @@ class Chewy
       return [self, nil] unless @recommended_list
       if message.to_s == "enter"
         idx = @recommended_list.selected_index rescue 0
-        if idx < PRELOADED_MODELS.length
-          m = PRELOADED_MODELS[idx]
+        if idx == 0
+          # Starter Packs
+          @overlay = :starter_pack
+          @starter_pack_selected = []
+          return [self, nil]
+        end
+        model_idx = idx - 1  # offset for Starter Packs entry
+        if model_idx < PRELOADED_MODELS.length
+          m = PRELOADED_MODELS[model_idx]
           dest = File.join(@models_dir, m[:file])
           if File.exist?(dest)
             return [self, set_error_toast("#{m[:name]} is already installed")]
           end
           return [self, start_model_download(m[:repo], m[:file], m[:size])]
-        elsif idx == PRELOADED_MODELS.length
+        elsif model_idx == PRELOADED_MODELS.length
           return enter_hf_search_mode
         else
           return enter_civitai_search_mode
@@ -842,12 +851,20 @@ class Chewy
     # ========== Starter Pack Downloads ==========
 
     def start_starter_pack_download(index)
-      pack = STARTER_PACKS[index]
-      items = resolve_starter_pack_items(pack)
+      start_starter_pack_download_multi([index])
+    end
+
+    def start_starter_pack_download_multi(indices)
+      # Merge items from all selected packs, deduplicate by file
+      all_items = indices.flat_map do |i|
+        pack = STARTER_PACKS[i]
+        resolve_starter_pack_items(pack)
+      end
+      items = all_items.uniq { |item| item[:file] }
       items = items.reject { |item| starter_pack_item_installed?(item) }
 
       if items.empty?
-        return [self, set_status_toast("#{pack[:name]} — everything already installed!")]
+        return [self, set_status_toast("Everything already installed!")]
       end
 
       @starter_pack_downloading = true

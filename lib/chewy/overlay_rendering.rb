@@ -1101,24 +1101,29 @@ class Chewy
           "#{bar} #{dim.render(size_text)}",
         ].join("\n")
       else
+        checked_indices = @starter_pack_selected || []
         lines = STARTER_PACKS.each_with_index.map do |pack, i|
-          selected = i == @starter_pack_index
-          if selected
+          highlighted = i == @starter_pack_index
+          checked = checked_indices.include?(i)
+          check = checked ?
+            Lipgloss::Style.new.foreground(Theme.SUCCESS).render("[x]") :
+            Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("[ ]")
+          if highlighted
             cursor = accent.render("> ")
             name = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true).render(pack[:name])
             desc = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render(pack[:desc])
-            "#{cursor}#{name}\n    #{desc}"
+            "#{cursor}#{check} #{name}\n     #{desc}"
           else
             name = Lipgloss::Style.new.foreground(Theme.TEXT).render(pack[:name])
             desc = dim.render(pack[:desc])
-            "  #{name}\n    #{desc}"
+            "  #{check} #{name}\n     #{desc}"
           end
         end
         content = lines.join("\n\n")
       end
 
       welcome = Theme.gradient_text("Welcome to Chewy!", Theme.PRIMARY, Theme.ACCENT)
-      subtitle = dim.render("Pick a starter pack to download models and get started:")
+      subtitle = dim.render("Select packs with space, then enter to download:")
       body_content = "#{welcome}\n#{subtitle}\n#{separator}\n\n#{content}"
 
       body = Lipgloss::Style.new
@@ -1128,7 +1133,7 @@ class Chewy
       status_text = if @starter_pack_downloading
         "downloading... please wait"
       else
-        "enter: download pack | s/esc: skip (download later with ^d)"
+        "space: toggle | enter: download selected | s/esc: skip (download later with ^d)"
       end
       key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
       desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
