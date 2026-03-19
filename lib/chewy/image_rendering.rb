@@ -459,6 +459,44 @@ class Chewy
       n.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse
     end
 
+    # Calculate safe thread count based on current system load
+    def safe_thread_count
+      total = Etc.nprocessors
+      if RUBY_PLATFORM.include?("darwin")
+        # macOS: use sysctl for load average (1-minute)
+        load_avg = `sysctl -n vm.loadavg 2>/dev/null`[/\{ ([\d.]+)/, 1]&.to_f || 0
+      else
+        # Linux: /proc/loadavg
+        load_avg = (File.read("/proc/loadavg").split.first&.to_f rescue 0)
+      end
+      # Reserve cores proportional to current load
+      # If load is 0, use all but 2. If load is high, scale down more.
+      busy_cores = load_avg.ceil
+      available = total - [busy_cores, 2].max
+      available.clamp(1, total - 1)
+    rescue
+      [total - 2, 1].max
+    end
+
+    # Estimate available system memory in bytes
+    def estimate_available_memory
+      if RUBY_PLATFORM.include?("darwin")
+        # macOS: use vm_stat to get free + inactive pages
+        output = `vm_stat 2>/dev/null`
+        page_size = output[/page size of (\d+)/, 1]&.to_i || 16384
+        free = output[/Pages free:\s+(\d+)/, 1]&.to_i || 0
+        inactive = output[/Pages inactive:\s+(\d+)/, 1]&.to_i || 0
+        (free + inactive) * page_size
+      else
+        # Linux: use /proc/meminfo
+        meminfo = File.read("/proc/meminfo") rescue ""
+        available = meminfo[/MemAvailable:\s+(\d+)/, 1]&.to_i
+        available ? available * 1024 : 0
+      end
+    rescue
+      0  # can't determine — skip the check
+    end
+
     # Generate an inpainting mask with a center oval preserved (black) and edges regenerated (white).
     # Feathered edge prevents hard seam artifacts.
     def generate_center_preserve_mask(width, height, output_path, oval_pct: 0.35)

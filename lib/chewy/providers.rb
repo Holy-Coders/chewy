@@ -227,6 +227,7 @@ class LocalSdCppProvider < Provider::Base
       args += ["--control-net", request.controlnet_model, "--control-image", request.controlnet_image]
       args += ["--control-strength", (request.controlnet_strength || 0.9).to_s]
       args << "--canny" if request.controlnet_canny
+      args << "--control-net-cpu"  # offload ControlNet to CPU to save GPU memory
     end
     args
   end
