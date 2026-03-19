@@ -1038,5 +1038,28 @@ class Chewy
       @file_picker_thumb_cache[path] = thumb if thumb
       thumb
     end
+
+    # ========== ControlNet Download Overlay ==========
+
+    def render_cn_download_content
+      if @model_downloading
+        return "#{@spinner.view} #{Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("Downloading #{@download_filename}...")}"
+      end
+      return Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render("Loading...") unless @cn_download_list
+      @cn_download_list.view
+    end
+
+    def render_cn_download_status
+      if @model_downloading
+        current = (File.size(@download_dest) rescue 0)
+        pct = @download_total > 0 ? (current.to_f / @download_total) : 0
+        bar = @progress.view_as(pct.clamp(0.0, 1.0))
+        size_text = @download_total > 0 ?
+          "#{format_bytes(current)} / #{format_bytes(@download_total)}" :
+          format_bytes(current)
+        return "#{@download_filename} #{bar} #{size_text}"
+      end
+      "enter: download | esc: back"
+    end
   end
 end

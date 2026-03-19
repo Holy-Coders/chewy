@@ -223,6 +223,9 @@ class Chewy
       @model_downloading = false; @download_dest = nil; @download_filename = ""
       @error_message = nil
       scan_models
+      if @overlay == :cn_download
+        return exit_cn_download
+      end
       @overlay = :models
       [self, set_status_toast("Downloaded #{message.filename}")]
     end
@@ -756,6 +759,80 @@ class Chewy
       @lora_download_view = :repos; @lora_file_list = nil; @lora_remote_files = []
       @lora_selected_repo_id = nil; @error_message = nil
       @lora_search_focused = false; @lora_search_input.blur
+      [self, nil]
+    end
+
+    # ========== ControlNet Download ==========
+
+    def enter_controlnet_download
+      family = current_model_family
+      filtered = if family
+        RECOMMENDED_CONTROLNETS.select { |c| c[:model_family] == family }
+      else
+        RECOMMENDED_CONTROLNETS
+      end
+      @cn_download_list_data = filtered
+
+      items = filtered.map do |c|
+        already = File.exist?(File.join(@models_dir, c[:file]))
+        status = already ? " (installed)" : ""
+        { title: "#{c[:name]}#{status}", description: "#{format_bytes(c[:size])} — #{c[:desc]}" }
+      end
+      items = [{ title: "No ControlNet models for #{family}", description: "Try a different base model" }] if items.empty?
+
+      @cn_download_list = Bubbles::List.new(items, width: @width - 12, height: [@height - 10, 6].max)
+      @cn_download_list.show_title = false
+      @cn_download_list.show_status_bar = false
+      @cn_download_list.selected_item_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+      @cn_download_list.item_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+
+      @overlay = :cn_download
+      @error_message = nil
+      [self, nil]
+    end
+
+    def handle_cn_download_key(message)
+      key = message.to_s
+      return exit_cn_download if key == "esc" || key == "q"
+      return [self, nil] if @model_downloading
+
+      if key == "enter" && @cn_download_list
+        idx = @cn_download_list.selected_index rescue 0
+        filtered = @cn_download_list_data || []
+        if idx < filtered.length
+          c = filtered[idx]
+          dest = File.join(@models_dir, c[:file])
+          if File.exist?(dest)
+            return [self, set_error_toast("#{c[:name]} is already installed")]
+          end
+          return [self, start_model_download(c[:repo], c[:file], c[:size])]
+        end
+        return [self, nil]
+      end
+
+      @cn_download_list, cmd = @cn_download_list.update(message)
+      [self, cmd]
+    end
+
+    def exit_cn_download
+      @model_downloading = false
+      @cn_download_list = nil; @cn_download_list_data = nil
+      @overlay = nil; @error_message = nil
+      scan_models
+      # Auto-select the downloaded ControlNet model if one was just installed
+      if !@controlnet_model_path
+        cn = RECOMMENDED_CONTROLNETS.find { |c| File.exist?(File.join(@models_dir, c[:file])) }
+        if cn
+          @controlnet_model_path = File.join(@models_dir, cn[:file])
+          @controlnet_canny = cn[:use_canny]
+          @controlnet_image_path = @init_image_path if @init_image_path && !@controlnet_image_path
+        end
+      end
+      update_param_keys
+      case @focus
+      when FOCUS_PROMPT then @prompt_input.focus
+      when FOCUS_NEGATIVE then @negative_input.focus
+      end
       [self, nil]
     end
   end

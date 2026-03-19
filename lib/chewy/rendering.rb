@@ -811,7 +811,10 @@ class Chewy
         elsif key == :strength
           hint = @init_image_path ? "" : Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" (^b to set image)")
           "#{val_style.render(value.to_s)}#{hint}"
-        elsif key == :cn_model || key == :cn_image
+        elsif key == :cn_model
+          hint = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" (enter: browse | d: download)")
+          "#{val_style.render(value.to_s)}#{hint}"
+        elsif key == :cn_image
           hint = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" (enter to browse)")
           "#{val_style.render(value.to_s)}#{hint}"
         elsif key == :cn_canny

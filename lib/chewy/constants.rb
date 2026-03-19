@@ -41,6 +41,10 @@ BUILTIN_PRESETS = {
   "Image Edit - High Quality" => { "steps" => 35, "cfg_scale" => 7.0, "strength" => 0.65, "sampler" => "dpm++2m", "scheduler" => "karras" },
   "Image Edit - Creative" => { "steps" => 30, "cfg_scale" => 8.0, "strength" => 0.85, "sampler" => "euler_a", "scheduler" => "karras" },
   "Image Edit - Subtle" => { "steps" => 25, "cfg_scale" => 7.0, "strength" => 0.3, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  # --- ControlNet (SD 1.5) ---
+  "CN - Face Preserve" => { "steps" => 30, "cfg_scale" => 7.0, "strength" => 0.4, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd", "cn_strength" => 0.85, "cn_canny" => true },
+  "CN - Restyle (keep structure)" => { "steps" => 30, "cfg_scale" => 7.5, "strength" => 0.65, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sd", "cn_strength" => 0.7, "cn_canny" => true },
+  "CN - Creative (loose guide)" => { "steps" => 35, "cfg_scale" => 8.0, "strength" => 0.8, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd", "cn_strength" => 0.5, "cn_canny" => true },
   # --- img2img (FLUX) ---
   "FLUX Edit - Subtle" => { "steps" => 28, "cfg_scale" => 1.0, "strength" => 0.5, "guidance" => 5.0, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
   "FLUX Edit - Balanced" => { "steps" => 28, "cfg_scale" => 1.0, "strength" => 0.75, "guidance" => 7.0, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
@@ -253,6 +257,40 @@ RECOMMENDED_LORAS = [
     recommended_weight: { min: 0.5, max: 0.9, default: 0.7 },
     tags: %w[papercut craft style artistic whimsical],
     example_prompt: "papercut a cute fox in a forest",
+  },
+].freeze
+
+# Curated list of recommended ControlNet models
+RECOMMENDED_CONTROLNETS = [
+  {
+    name: "Canny Edge (SD 1.5)",
+    repo: "afrideva/control_v11p_sd15_canny-controlnet-gguf",
+    file: "control_v11p_sd15_canny-Q8_0.gguf",
+    size: 1_450_000_000,
+    model_family: "SD 1.x",
+    control_type: :canny,
+    desc: "Preserves edges and structure — best for face/pose preservation",
+    use_canny: true,
+  },
+  {
+    name: "Depth (SD 1.5)",
+    repo: "afrideva/control_v11f1p_sd15_depth-controlnet-gguf",
+    file: "control_v11f1p_sd15_depth-Q8_0.gguf",
+    size: 1_450_000_000,
+    model_family: "SD 1.x",
+    control_type: :depth,
+    desc: "Preserves spatial depth — good for scenes and landscapes",
+    use_canny: false,
+  },
+  {
+    name: "OpenPose (SD 1.5)",
+    repo: "afrideva/control_v11p_sd15_openpose-controlnet-gguf",
+    file: "control_v11p_sd15_openpose-Q8_0.gguf",
+    size: 1_450_000_000,
+    model_family: "SD 1.x",
+    control_type: :openpose,
+    desc: "Preserves body pose — restyle people while keeping their pose",
+    use_canny: false,
   },
 ].freeze
 

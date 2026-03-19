@@ -427,6 +427,7 @@ class Chewy
         lora_title = family ? "LoRA Selection [#{family}]" : "LoRA Selection"
         render_overlay_panel(lora_title, render_lora_content, render_lora_status)
       when :lora_download then render_lora_download_view
+      when :cn_download then render_overlay_panel("ControlNet Models", render_cn_download_content, render_cn_download_status)
       when :help then render_help_view
       when :preset   then render_overlay_panel("Presets", render_preset_content, render_preset_status)
       when :hf_token then render_overlay_panel("HuggingFace Token", render_hf_token_content, render_hf_token_status)

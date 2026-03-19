@@ -58,6 +58,7 @@ class Chewy
       when :download then handle_download_key(message)
       when :lora     then handle_lora_panel_key(message)
       when :lora_download then handle_lora_download_key(message)
+      when :cn_download then handle_cn_download_key(message)
       when :help     then handle_help_key(message)
       when :preset   then handle_preset_panel_key(message)
       when :theme    then handle_theme_key(message)
@@ -465,6 +466,14 @@ class Chewy
       @params[:strength] = d["strength"].to_f if d["strength"]
       @params[:guidance] = d["guidance"].to_f if d["guidance"]
 
+      # ControlNet settings
+      if d.key?("cn_strength")
+        @controlnet_strength = d["cn_strength"].to_f
+      end
+      if d.key?("cn_canny")
+        @controlnet_canny = !!d["cn_canny"]
+      end
+
       # Model selection: exact path (user presets) or type match (builtins)
       if d["model"] && File.exist?(d["model"])
         @selected_model_path = d["model"]
@@ -472,6 +481,7 @@ class Chewy
       elsif d["model_type"] && @provider.provider_type == :local
         select_model_by_type(d["model_type"])
       end
+      update_param_keys
     end
 
     def save_user_preset(name)
@@ -642,6 +652,10 @@ class Chewy
             return [self, toast]
           when :cn_model
             @controlnet_model_path = entry[:path]
+            # Auto-set control image to init image if not already set
+            if !@controlnet_image_path && @init_image_path
+              @controlnet_image_path = @init_image_path
+            end
             toast = set_status_toast("ControlNet model: #{File.basename(entry[:path])}")
             close_overlay
             return [self, toast]

@@ -297,6 +297,10 @@ class Chewy
           @editing_param = true
           @param_edit_buffer = param_value(current_key).to_s
         end
+      when "d"
+        if current_key == :cn_model
+          return enter_controlnet_download
+        end
       when "left", "right"
         if current_key == :sampler
           dir = key == "left" ? -1 : 1
