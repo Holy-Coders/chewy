@@ -107,6 +107,7 @@ class Chewy
           @selected_model_path = @model_paths[idx]
           @preview_cache = nil # invalidate preview when model changes
           filter_loras # re-filter LoRAs for new model family
+          update_param_keys # refresh param list (e.g. guidance for FLUX)
           save_config
           # Validate model in background if we don't know its type yet
           validate_cmd = nil

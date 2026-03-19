@@ -279,6 +279,7 @@ class Chewy
   def init
     scan_models
     scan_loras
+    update_param_keys
     _spinner, spinner_cmd = @spinner.init
     splash_cmd = Bubbletea.tick(0.4) { SplashTickMessage.new(phase: 1) }
     cmds = [spinner_cmd, splash_cmd]
