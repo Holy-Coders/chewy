@@ -710,9 +710,14 @@ class Chewy
       ["Image", [
         ["^b", "Browse for init image (img2img)"],
         ["^v", "Paste (text in prompt, image elsewhere)"],
-        ["^u", "Clear init image"],
+        ["^u", "Clear init image + mask"],
         ["^e", "Open last image in viewer"],
         ["^f", "Fullscreen image preview"],
+      ]],
+      ["Mask (on mask param)", [
+        ["g", "Auto-generate center-preserve mask"],
+        ["p", "Open mask painter (click to paint)"],
+        ["x", "Clear mask"],
       ]],
       ["App", [
         ["F1", "Toggle this help"],
@@ -1060,6 +1065,54 @@ class Chewy
         return "#{@download_filename} #{bar} #{size_text}"
       end
       "enter: download | esc: back"
+    end
+
+    # ========== Mask Painter Overlay ==========
+
+    def render_mask_painter_view
+      return "" unless @mask_paint_grid && @mask_paint_grid_colors
+
+      dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+      title_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+      brush_label = @mask_paint_brush == :paint ? "PAINT (white=regenerate)" : "ERASE (black=keep)"
+      brush_style = @mask_paint_brush == :paint ?
+        Lipgloss::Style.new.foreground(Theme.WARNING).bold(true) :
+        Lipgloss::Style.new.foreground(Theme.SUCCESS).bold(true)
+
+      title_bar = "#{title_style.render("Mask Painter")}  #{brush_style.render(brush_label)}"
+
+      # Render the grid: show image colors dimmed, with white overlay where masked
+      lines = @mask_paint_rows.times.map do |row|
+        line = +""
+        @mask_paint_cols.times do |col|
+          if @mask_paint_grid[row][col]
+            # Masked (white = regenerate) — show bright white block
+            line << "\e[48;2;255;255;255m \e[0m"
+          else
+            # Unmasked (keep) — show image color dimmed
+            r, g, b = @mask_paint_grid_colors[row][col]
+            # Dim the color to show it's "kept"
+            r = (r * 0.5).to_i; g = (g * 0.5).to_i; b = (b * 0.5).to_i
+            line << "\e[48;2;#{r};#{g};#{b}m \e[0m"
+          end
+        end
+        line
+      end
+
+      grid_content = lines.join("\n")
+
+      body_content = "#{title_bar}\n\n#{grid_content}"
+      body = Lipgloss::Style.new
+        .border(:rounded).border_foreground(Theme.PRIMARY).background(Theme.SURFACE)
+        .width(@width - 4).height(@height - 4).padding(0, 1).render(body_content)
+
+      status_text = "click: paint | b: toggle brush | i: invert | c: clear | f: fill | enter: confirm | esc: cancel"
+      key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
+      desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+      status = Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE)
+        .render(format_help_text(status_text, key_style, desc_style))
+
+      Lipgloss.join_vertical(:left, body, status)
     end
   end
 end

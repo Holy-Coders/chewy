@@ -814,26 +814,52 @@ class Chewy
       [self, cmd]
     end
 
+    def start_controlnet_download(repo_id, hf_filename, local_filename, size)
+      FileUtils.mkdir_p(@models_dir)
+      dest = File.join(@models_dir, local_filename); part = "#{dest}.part"
+      @model_downloading = true; @download_dest = part
+      @download_total = size || 0; @download_filename = local_filename; @error_message = nil
+      url = "#{HF_DOWNLOAD_BASE}/#{repo_id}/resolve/main/#{URI.encode_www_form_component(hf_filename)}"
+      Proc.new do
+        _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",
+          "-C", "-", "--retry", "5", "--retry-delay", "3", "--retry-all-errors",
+          "--connect-timeout", "30", url)
+        if st.success?
+          File.rename(part, dest)
+          ModelDownloadDoneMessage.new(path: dest, filename: local_filename)
+        else
+          ModelDownloadErrorMessage.new(error: "Download failed (exit #{st.exitstatus}). Try again to resume.")
+        end
+      rescue Errno::ENOENT
+        File.delete(part) if File.exist?(part)
+        ModelDownloadErrorMessage.new(error: "curl not found")
+      rescue => e
+        File.delete(part) rescue nil
+        ModelDownloadErrorMessage.new(error: e.message)
+      end
+    end
+
     def exit_cn_download
+      was_downloading = @model_downloading
       @model_downloading = false
       @cn_download_list = nil; @cn_download_list_data = nil
       @overlay = nil; @error_message = nil
       scan_models
-      # Auto-select the downloaded ControlNet model if one was just installed
-      if !@controlnet_model_path
-        cn = RECOMMENDED_CONTROLNETS.find { |c| File.exist?(File.join(@models_dir, c[:file])) }
-        if cn
-          @controlnet_model_path = File.join(@models_dir, cn[:file])
-          @controlnet_canny = cn[:use_canny]
-          @controlnet_image_path = @init_image_path if @init_image_path && !@controlnet_image_path
-        end
+      # Auto-select the downloaded ControlNet model
+      cn = RECOMMENDED_CONTROLNETS.find { |c| File.exist?(File.join(@models_dir, c[:file])) }
+      if cn
+        @controlnet_model_path = File.join(@models_dir, cn[:file])
+        @controlnet_canny = cn[:use_canny]
+        # Always sync control image to init image
+        @controlnet_image_path = @init_image_path if @init_image_path
       end
       update_param_keys
       case @focus
       when FOCUS_PROMPT then @prompt_input.focus
       when FOCUS_NEGATIVE then @negative_input.focus
       end
-      [self, nil]
+      toast = cn ? set_status_toast("ControlNet ready: #{cn[:name]}") : nil
+      [self, toast]
     end
   end
 end

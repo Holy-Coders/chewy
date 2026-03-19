@@ -92,6 +92,7 @@ class Chewy
         keys << :cn_strength
         keys << :cn_canny
       end
+      keys << :mask_image if caps.inpainting
       @param_display_keys = keys
       @param_index = [[@param_index, keys.length - 1].min, 0].max
     end

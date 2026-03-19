@@ -342,7 +342,16 @@ class Chewy
         ""
       end
 
-      left = "#{logo}#{provider_section}#{model_info}#{img2img_badge}#{controlnet_badge}"
+      mask_badge = if @mask_image_path
+        mk = Lipgloss::Style.new.foreground(Theme.WARNING).bold(true)
+        name = File.basename(@mask_image_path)
+        name = name[0, 15] + "..." if name.length > 18
+        " #{dim.render("\u2502")} #{mk.render("MASK")} #{dim.render(name)}"
+      else
+        ""
+      end
+
+      left = "#{logo}#{provider_section}#{model_info}#{img2img_badge}#{controlnet_badge}#{mask_badge}"
 
       if narrow?
         # Truncate left content to fit and skip right-side hints
@@ -817,6 +826,9 @@ class Chewy
         elsif key == :cn_image
           hint = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" (enter to browse)")
           "#{val_style.render(value.to_s)}#{hint}"
+        elsif key == :mask_image
+          hint = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).render(" (enter: browse | g: auto | p: paint | x: clear)")
+          "#{val_style.render(value.to_s)}#{hint}"
         elsif key == :cn_canny
           toggle = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
           "#{toggle.render("<")} #{val_style.render(value.to_s)} #{toggle.render(">")}"
@@ -878,6 +890,7 @@ class Chewy
       when :cn_image then "CN Image "
       when :cn_strength then "CN Str   "
       when :cn_canny then "CN Canny "
+      when :mask_image then "Mask     "
       else key.to_s.ljust(9)
       end
     end

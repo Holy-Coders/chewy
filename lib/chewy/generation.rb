@@ -27,6 +27,10 @@ class Chewy
         end
       end
 
+      if @mask_image_path && !@init_image_path
+        return [self, set_error_toast("Mask requires an init image — press ^b to browse")]
+      end
+
       # Warn if selected LoRAs appear incompatible with the model architecture
       if @selected_loras.any? && @provider.provider_type == :local && @selected_model_path
         model_type = detect_model_type(@selected_model_path)
@@ -100,6 +104,7 @@ class Chewy
         controlnet_image: @controlnet_image_path,
         controlnet_strength: @controlnet_strength,
         controlnet_canny: @controlnet_canny,
+        mask_image: @mask_image_path,
       )
 
       sidecar_base = {
@@ -118,6 +123,7 @@ class Chewy
         sidecar_base["controlnet_strength"] = @controlnet_strength
         sidecar_base["controlnet_canny"] = @controlnet_canny
       end
+      sidecar_base["mask_image"] = @mask_image_path if @mask_image_path
 
       provider = @provider  # capture for thread safety
 
@@ -178,6 +184,36 @@ class Chewy
     def open_image(path)
       opener = RUBY_PLATFORM.include?("darwin") ? "open" : "xdg-open"
       spawn(opener, path, [:out, :err] => "/dev/null")
+    end
+
+    def generate_quick_mask
+      unless @init_image_path
+        return [self, set_error_toast("Set an init image first (^b)")]
+      end
+      mask_path = File.join(@output_dir, ".mask_#{Time.now.strftime('%Y%m%d_%H%M%S')}.png")
+      FileUtils.mkdir_p(@output_dir)
+      generate_center_preserve_mask(@params[:width], @params[:height], mask_path)
+      @mask_image_path = mask_path
+      [self, set_status_toast("Auto-mask generated (center preserved)")]
+    end
+
+    def open_mask_painter
+      unless @init_image_path
+        return [self, set_error_toast("Set an init image first (^b)")]
+      end
+      # Build the paint grid from the init image
+      paint_cols = [(@width * 0.4).to_i, 30].max
+      paint_rows = [(@height - 8), 10].max
+      @mask_paint_grid_colors = build_paint_grid(@init_image_path, paint_cols, paint_rows)
+      unless @mask_paint_grid_colors
+        return [self, set_error_toast("Failed to load image for mask painting")]
+      end
+      @mask_paint_grid = Array.new(paint_rows) { Array.new(paint_cols, false) }
+      @mask_paint_cols = paint_cols
+      @mask_paint_rows = paint_rows
+      @mask_paint_brush = :paint  # :paint or :erase
+      @overlay = :mask_painter
+      [self, nil]
     end
 
     def load_prompt_history_from_disk

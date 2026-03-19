@@ -155,6 +155,8 @@ class Chewy
       when :gallery
         # Click anywhere in gallery
         nil
+      when :mask_painter
+        return handle_mask_painter_mouse(message)
       end
 
       [self, nil]
@@ -210,7 +212,7 @@ class Chewy
         end
       when "ctrl+u"
         unless @focus == FOCUS_PROMPT || @focus == FOCUS_NEGATIVE
-          @init_image_path = nil; return [self, set_status_toast("Init image cleared")]
+          @init_image_path = nil; @mask_image_path = nil; return [self, set_status_toast("Init image cleared")]
         end
       when "ctrl+x" then if @generating; @gen_cancelled = true; @provider.cancel(@gen_pid) if @provider.capabilities.cancel && @gen_pid; end; return [self, nil]
       when "ctrl+y" then return toggle_overlay(:provider)
@@ -221,7 +223,7 @@ class Chewy
         # Clear prompt, image, and reset to starting state
         @prompt_input.value = ""; @negative_input.value = ""
         @last_output_path = nil; @last_generation_time = nil; @last_seed = nil
-        @init_image_path = nil; @preview_cache = nil; @preview_path = nil
+        @init_image_path = nil; @mask_image_path = nil; @preview_cache = nil; @preview_path = nil
         clear_kitty_images if @kitty_graphics
         @focus = FOCUS_PROMPT; @prompt_input.focus; @negative_input.blur
         return [self, set_status_toast("Cleared")]
@@ -293,6 +295,8 @@ class Chewy
         elsif current_key == :cn_strength
           @editing_param = true
           @param_edit_buffer = @controlnet_strength.to_s
+        elsif current_key == :mask_image
+          return open_file_picker_for(:mask)
         else
           @editing_param = true
           @param_edit_buffer = param_value(current_key).to_s
@@ -300,6 +304,19 @@ class Chewy
       when "d"
         if current_key == :cn_model
           return enter_controlnet_download
+        end
+      when "g"
+        if current_key == :mask_image
+          return generate_quick_mask
+        end
+      when "p"
+        if current_key == :mask_image
+          return open_mask_painter
+        end
+      when "x"
+        if current_key == :mask_image
+          @mask_image_path = nil
+          return [self, set_status_toast("Mask cleared")]
         end
       when "left", "right"
         if current_key == :sampler
@@ -325,13 +342,14 @@ class Chewy
       when :cn_image then @controlnet_image_path ? File.basename(@controlnet_image_path) : "none"
       when :cn_strength then @controlnet_strength
       when :cn_canny then @controlnet_canny ? "on" : "off"
+      when :mask_image then @mask_image_path ? File.basename(@mask_image_path) : "none"
       else @params[key]
       end
     end
 
     def commit_param_edit
       key = @param_display_keys[@param_index]
-      return if key == :sampler || key == :scheduler
+      return if key == :sampler || key == :scheduler || key == :mask_image
 
       if key == :cn_strength
         @controlnet_strength = @param_edit_buffer.to_f.clamp(0.0, 1.0)

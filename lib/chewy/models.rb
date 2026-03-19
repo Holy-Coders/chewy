@@ -16,6 +16,7 @@ class Chewy
         .uniq
         .reject { |f| companion_names.include?(File.basename(f)) }
         .reject { |f| File.basename(f) =~ /\blora\b/i }   # LoRA weights, not diffusion models
+        .reject { |f| File.basename(f) =~ /\bcontrol\b/i } # ControlNet models, not diffusion models
         .reject { |f| File.size(f) < 100_000_000 }         # too small to be a diffusion model
 
       # Sort: pinned first, recent second, rest alphabetical
@@ -332,7 +333,8 @@ class Chewy
       return unless pattern
 
       # Prefer pinned models, then recent, then any match
-      candidates = Dir.glob(File.join(@models_dir, "**", "*.{gguf,safetensors,ckpt}"))
+      # Use the already-scanned model list to avoid matching ControlNet/LoRA/companion files
+      candidates = @model_paths || []
       match = (@pinned_models || []).find { |p| File.basename(p) =~ pattern && File.exist?(p) }
       match ||= (@recent_models || []).find { |p| File.basename(p) =~ pattern && File.exist?(p) }
       match ||= candidates.find { |p| File.basename(p) =~ pattern }

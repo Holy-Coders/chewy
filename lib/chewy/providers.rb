@@ -7,13 +7,14 @@ module Provider
     :negative_prompt, :seed, :batch, :img2img, :live_preview,
     :cancel, :model_listing, :lora, :cfg_scale, :sampler,
     :scheduler, :threads, :strength, :width_height, :controlnet,
+    :inpainting,
     keyword_init: true
   ) do
     def initialize(**kwargs)
       defaults = { negative_prompt: false, seed: false, batch: false, img2img: false,
                    live_preview: false, cancel: false, model_listing: false, lora: false,
                    cfg_scale: false, sampler: false, scheduler: false, threads: false,
-                   strength: false, width_height: true, controlnet: false }
+                   strength: false, width_height: true, controlnet: false, inpainting: false }
       super(**defaults.merge(kwargs))
     end
   end
@@ -24,6 +25,7 @@ module Provider
     :init_image, :strength, :threads, :loras, :output_dir,
     :is_flux, :flux_clip_l, :flux_t5xxl, :flux_vae, :guidance,
     :controlnet_model, :controlnet_image, :controlnet_strength, :controlnet_canny,
+    :mask_image,
     keyword_init: true
   )
 
@@ -90,7 +92,7 @@ class LocalSdCppProvider < Provider::Base
       negative_prompt: true, seed: true, batch: true, img2img: true,
       live_preview: true, cancel: true, model_listing: true, lora: true,
       cfg_scale: true, sampler: true, scheduler: true, threads: true,
-      strength: true, width_height: true, controlnet: true
+      strength: true, width_height: true, controlnet: true, inpainting: true
     )
   end
 
@@ -220,10 +222,11 @@ class LocalSdCppProvider < Provider::Base
     if request.init_image
       args += ["--init-img", request.init_image, "--strength", request.strength.to_s]
     end
+    args += ["--mask", request.mask_image] if request.mask_image
     if request.controlnet_model && request.controlnet_image
       args += ["--control-net", request.controlnet_model, "--control-image", request.controlnet_image]
       args += ["--control-strength", (request.controlnet_strength || 0.9).to_s]
-      args << "--control-canny" if request.controlnet_canny
+      args << "--canny" if request.controlnet_canny
     end
     args
   end
@@ -304,7 +307,9 @@ class LocalSdCppProvider < Provider::Base
   def diagnose_error(all_output, status, model)
     exit_code = status&.exitstatus || "unknown"
     last_line = all_output.lines.last&.strip || "unknown"
-    if all_output.include?("get sd version from file failed") || all_output.include?("new_sd_ctx_t failed")
+    if all_output.include?("load control net tensors from model loader failed")
+      "ControlNet model failed to load — try a different ControlNet model (.pth format required)"
+    elsif all_output.include?("get sd version from file failed") || all_output.include?("new_sd_ctx_t failed")
       name = File.basename(model)
       "\"#{name}\" is not a supported diffusion model — try a different model"
     elsif all_output.include?("out of memory") || all_output.include?("GGML_ASSERT")
@@ -863,7 +868,7 @@ class A1111Provider < Provider::Base
       negative_prompt: true, seed: true, batch: true, img2img: true,
       live_preview: false, cancel: true, model_listing: true, lora: false,
       cfg_scale: true, sampler: true, scheduler: false, threads: false,
-      strength: true, width_height: true, controlnet: false
+      strength: true, width_height: true, controlnet: false, inpainting: true
     )
   end
 

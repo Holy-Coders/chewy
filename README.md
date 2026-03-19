@@ -108,6 +108,16 @@ Place LoRA `.safetensors` files in `~/.config/chewy/loras` (or set `CHEWY_LORA_D
 
 Press `d` in the LoRA panel to browse recommended LoRAs or search HuggingFace and CivitAI. Recommended picks include Detail Tweaker, LCM LoRA (for fast generation), Pixel Art, and Papercut styles. Chewy warns if a LoRA doesn't match your model's architecture (e.g. SDXL LoRA on SD 1.5 model).
 
+### Inpainting
+
+Inpainting lets you selectively regenerate parts of an image while preserving others (e.g. change the background but keep the face). Set an init image (`^b`), then in the params panel navigate to `Mask` and:
+
+- Press `g` to auto-generate a center-preserve mask (keeps the face, regenerates the rest)
+- Press `p` to open the **mask painter** — click to paint which areas to regenerate
+- Press `enter` to browse for a custom mask image
+
+White pixels in the mask = regenerate, black = keep. The "Inpaint - Face Preserve" preset configures everything automatically.
+
 ### Themes
 
 10 built-in color themes: Midnight (default), Dracula, Catppuccin, Tokyo Night, Gruvbox, Nord, Rose Pine, Solarized, Horizon, and Light. Press `^t` to switch.

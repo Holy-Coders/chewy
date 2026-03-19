@@ -68,6 +68,7 @@ class Chewy
       when :gallery  then handle_gallery_key(message)
       when :fullscreen_image then handle_fullscreen_key(message)
       when :file_picker then handle_file_picker_key(message)
+      when :mask_painter then handle_mask_painter_key(message)
       else [self, nil]
       end
     end
@@ -474,6 +475,14 @@ class Chewy
         @controlnet_canny = !!d["cn_canny"]
       end
 
+      # Auto-generate mask if preset requests it
+      if d["auto_mask"] == "center_preserve" && @init_image_path
+        mask_path = File.join(@output_dir, ".mask_#{Time.now.strftime('%Y%m%d_%H%M%S')}.png")
+        FileUtils.mkdir_p(@output_dir)
+        generate_center_preserve_mask(d["width"] || @params[:width], d["height"] || @params[:height], mask_path)
+        @mask_image_path = mask_path
+      end
+
       # Model selection: exact path (user presets) or type match (builtins)
       if d["model"] && File.exist?(d["model"])
         @selected_model_path = d["model"]
@@ -531,6 +540,11 @@ class Chewy
         elsif File.directory?(@output_dir) then File.expand_path(@output_dir)
         else File.expand_path("~")
         end
+      when :mask
+        if @mask_image_path then File.dirname(@mask_image_path)
+        elsif File.directory?(@output_dir) then File.expand_path(@output_dir)
+        else File.expand_path("~")
+        end
       else
         File.expand_path("~")
       end
@@ -539,6 +553,15 @@ class Chewy
     end
 
     def open_controlnet_model_picker
+      # If no ControlNet model installed, go straight to download
+      cn_installed = RECOMMENDED_CONTROLNETS.any? { |c| File.exist?(File.join(@models_dir, c[:file])) }
+      existing_cn = Dir.glob(File.join(@models_dir, "**", "*.{gguf,safetensors}")).any? { |f|
+        File.basename(f).downcase.include?("control")
+      }
+      unless cn_installed || existing_cn || @controlnet_model_path
+        return enter_controlnet_download
+      end
+
       @file_picker_target = :cn_model
       case @focus
       when FOCUS_PROMPT then @prompt_input.blur
@@ -573,6 +596,8 @@ class Chewy
             ext = File.extname(name).downcase
             allowed = @file_picker_target == :cn_model ? MODEL_EXTENSIONS : IMAGE_EXTENSIONS
             if allowed.include?(ext)
+              # When browsing for ControlNet models, only show files with "control" in the name
+              next if @file_picker_target == :cn_model && !name.downcase.include?("control")
               size = File.size(full) rescue 0
               entries << { name: name, path: full, type: :file, size: size }
             end
@@ -659,8 +684,15 @@ class Chewy
             toast = set_status_toast("ControlNet model: #{File.basename(entry[:path])}")
             close_overlay
             return [self, toast]
+          when :mask
+            @mask_image_path = entry[:path]
+            toast = set_status_toast("Mask: #{File.basename(entry[:path])}")
+            close_overlay
+            return [self, toast]
           else
             @init_image_path = entry[:path]
+            # Auto-sync control image when ControlNet is active
+            @controlnet_image_path = entry[:path] if @controlnet_model_path
             toast = set_status_toast("Init image: #{File.basename(entry[:path])}")
             close_overlay
             return offer_img2img_settings(toast)
@@ -852,6 +884,70 @@ class Chewy
       end
       @hf_token_input, cmd = @hf_token_input.update(message)
       [self, cmd]
+    end
+
+    # ========== Mask Painter ==========
+
+    def handle_mask_painter_key(message)
+      key = message.to_s
+      case key
+      when "esc", "q"
+        @overlay = nil
+        @mask_paint_grid = nil; @mask_paint_grid_colors = nil
+        case @focus
+        when FOCUS_PROMPT then @prompt_input.focus
+        when FOCUS_NEGATIVE then @negative_input.focus
+        end
+        return [self, nil]
+      when "enter"
+        # Confirm — generate mask from grid and set it
+        mask_path = File.join(@output_dir, ".mask_#{Time.now.strftime('%Y%m%d_%H%M%S')}.png")
+        FileUtils.mkdir_p(@output_dir)
+        grid_to_mask(@mask_paint_grid, @params[:width], @params[:height], mask_path)
+        @mask_image_path = mask_path
+        @overlay = nil
+        @mask_paint_grid = nil; @mask_paint_grid_colors = nil
+        case @focus
+        when FOCUS_PROMPT then @prompt_input.focus
+        when FOCUS_NEGATIVE then @negative_input.focus
+        end
+        return [self, set_status_toast("Mask saved")]
+      when "i"
+        # Invert the mask
+        @mask_paint_grid.each do |row|
+          row.map! { |v| !v }
+        end
+      when "c"
+        # Clear (all black = keep everything)
+        @mask_paint_grid.each { |row| row.fill(false) }
+      when "f"
+        # Fill (all white = regenerate everything)
+        @mask_paint_grid.each { |row| row.fill(true) }
+      when "b"
+        # Toggle brush mode
+        @mask_paint_brush = @mask_paint_brush == :paint ? :erase : :paint
+      end
+      [self, nil]
+    end
+
+    def handle_mask_painter_mouse(message)
+      return [self, nil] unless message.press?
+      # Map terminal coordinates to grid coordinates
+      # Account for padding: 2 left, 1 top + 2 rows for title/status
+      cx = message.x - 3
+      cy = message.y - 4
+
+      return [self, nil] if cx < 0 || cy < 0
+      return [self, nil] unless @mask_paint_grid
+
+      # Each grid cell is 1 char wide, 1 row tall in the display
+      col = cx
+      row = cy
+
+      return [self, nil] if row >= @mask_paint_rows || col >= @mask_paint_cols
+
+      @mask_paint_grid[row][col] = (@mask_paint_brush == :paint)
+      [self, nil]
     end
   end
 end

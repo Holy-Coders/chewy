@@ -402,6 +402,19 @@
       <p>Chewy remembers every prompt you've used across sessions. Press <code>up</code> / <code>down</code> while in the prompt field to cycle through your history.</p>
       <p>History is loaded from your generation metadata files on disk, so even in a fresh session you'll have access to all your past prompts. New prompts from the current session are appended on top.</p>
 
+      <!-- Inpainting -->
+
+      <h2 id="inpainting">Inpainting</h2>
+      <p>Inpainting lets you selectively regenerate parts of an image while keeping others intact — perfect for changing backgrounds while preserving faces.</p>
+      <ol>
+        <li>Set an init image (<code>^b</code>)</li>
+        <li>Tab to params, navigate to <strong>Mask</strong></li>
+        <li>Press <code>g</code> for auto center-preserve mask, or <code>p</code> to paint a custom mask</li>
+        <li>Write your prompt and generate</li>
+      </ol>
+      <p>White pixels in the mask = regenerate, black = keep. The <strong>mask painter</strong> lets you click on the image to select which areas to change.</p>
+      <p>Built-in presets: "Inpaint - Face Preserve" and "Inpaint - Background Only" auto-generate a center mask and configure optimal settings.</p>
+
       <!-- Interface -->
 
       <h2 id="themes">Themes</h2>

@@ -150,6 +150,7 @@ class Chewy
     @controlnet_image_path = nil
     @controlnet_strength = 0.9
     @controlnet_canny = false
+    @mask_image_path = nil
     @file_picker_target = :init_image
     @file_picker_dir = File.expand_path("~")
     @file_picker_entries = []
@@ -361,6 +362,7 @@ class Chewy
         [self, nil]
       else
         @init_image_path = message.path
+        @controlnet_image_path = message.path if @controlnet_model_path
         [self, set_status_toast("Pasted image: #{File.basename(message.path)}")]
       end
     when ModelValidatedMessage
@@ -434,6 +436,7 @@ class Chewy
       when :gallery  then render_gallery_view
       when :fullscreen_image then render_fullscreen_image
       when :file_picker then render_file_picker_view
+      when :mask_painter then render_mask_painter_view
       when :theme then render_overlay_panel("Theme", render_theme_content, render_theme_status)
       when :provider then render_overlay_panel("Provider", render_provider_content, render_provider_status)
       when :api_key then render_overlay_panel("API Key", render_api_key_content, render_api_key_status)

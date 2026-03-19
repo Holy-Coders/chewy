@@ -458,5 +458,94 @@ class Chewy
     def format_number(n)
       n.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse
     end
+
+    # Generate an inpainting mask with a center oval preserved (black) and edges regenerated (white).
+    # Feathered edge prevents hard seam artifacts.
+    def generate_center_preserve_mask(width, height, output_path, oval_pct: 0.35)
+      mask = ChunkyPNG::Image.new(width, height, ChunkyPNG::Color::WHITE)
+      cx = width / 2.0
+      cy = height / 2.0
+      rx = width * oval_pct
+      ry = height * oval_pct
+
+      height.times do |y|
+        width.times do |x|
+          dx = (x - cx) / rx
+          dy = (y - cy) / ry
+          dist = Math.sqrt(dx * dx + dy * dy)
+          if dist <= 1.0
+            mask[x, y] = ChunkyPNG::Color::BLACK
+          elsif dist < 1.15
+            t = ((dist - 1.0) / 0.15).clamp(0.0, 1.0)
+            gray = (t * 255).to_i
+            mask[x, y] = ChunkyPNG::Color.rgb(gray, gray, gray)
+          end
+        end
+      end
+
+      mask.save(output_path)
+      output_path
+    end
+
+    # Build a grid representation of the init image for the mask painter.
+    # Returns an array of rows, each row an array of [r, g, b] averaged colors.
+    def build_paint_grid(path, cols, rows)
+      return nil unless path && File.exist?(path)
+      image = ChunkyPNG::Image.from_file(path)
+      cell_w = image.width.to_f / cols
+      cell_h = image.height.to_f / rows
+
+      rows.times.map do |row|
+        cols.times.map do |col|
+          # Sample center pixel of each cell
+          sx = ((col + 0.5) * cell_w).to_i.clamp(0, image.width - 1)
+          sy = ((row + 0.5) * cell_h).to_i.clamp(0, image.height - 1)
+          pixel = image[sx, sy]
+          [ChunkyPNG::Color.r(pixel), ChunkyPNG::Color.g(pixel), ChunkyPNG::Color.b(pixel)]
+        end
+      end
+    rescue
+      nil
+    end
+
+    # Convert a boolean grid (true = regenerate/white, false = keep/black) to a mask PNG.
+    def grid_to_mask(grid, width, height, output_path)
+      grid_rows = grid.length
+      grid_cols = grid.first.length
+      mask = ChunkyPNG::Image.new(width, height, ChunkyPNG::Color::BLACK)
+      cell_w = width.to_f / grid_cols
+      cell_h = height.to_f / grid_rows
+
+      grid_rows.times do |row|
+        grid_cols.times do |col|
+          next unless grid[row][col]
+          x0 = (col * cell_w).to_i
+          y0 = (row * cell_h).to_i
+          x1 = [((col + 1) * cell_w).to_i, width].min
+          y1 = [((row + 1) * cell_h).to_i, height].min
+          (y0...y1).each do |y|
+            (x0...x1).each do |x|
+              mask[x, y] = ChunkyPNG::Color::WHITE
+            end
+          end
+        end
+      end
+
+      # Feather edges: blur the boundary between masked/unmasked by 2 pixels
+      feathered = mask.dup
+      2.times do
+        tmp = feathered.dup
+        (1...height - 1).each do |y|
+          (1...width - 1).each do |x|
+            neighbors = [tmp[x-1, y], tmp[x+1, y], tmp[x, y-1], tmp[x, y+1], tmp[x, y]]
+            avg = neighbors.sum { |p| ChunkyPNG::Color.r(p) } / neighbors.length
+            feathered[x, y] = ChunkyPNG::Color.rgb(avg, avg, avg)
+          end
+        end
+      end
+
+      feathered.save(output_path)
+      output_path
+    end
   end
 end

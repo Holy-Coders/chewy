@@ -6,7 +6,7 @@ CHEWY_REPO = "Holy-Coders/chewy"
 HF_API_BASE = "https://huggingface.co/api"
 HF_DOWNLOAD_BASE = "https://huggingface.co"
 CIVITAI_API_BASE = "https://civitai.com/api/v1"
-MODEL_EXTENSIONS = %w[.gguf .safetensors .ckpt].freeze
+MODEL_EXTENSIONS = %w[.gguf .safetensors .ckpt .pth].freeze
 DOWNLOAD_SOURCES = [:huggingface, :civitai].freeze
 
 # Common macOS app model directories
@@ -42,13 +42,18 @@ BUILTIN_PRESETS = {
   "Image Edit - Creative" => { "steps" => 30, "cfg_scale" => 8.0, "strength" => 0.85, "sampler" => "euler_a", "scheduler" => "karras" },
   "Image Edit - Subtle" => { "steps" => 25, "cfg_scale" => 7.0, "strength" => 0.3, "sampler" => "dpm++2m", "scheduler" => "karras" },
   # --- ControlNet (SD 1.5) ---
-  "CN - Face Preserve" => { "steps" => 30, "cfg_scale" => 7.0, "strength" => 0.4, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd", "cn_strength" => 0.85, "cn_canny" => true },
-  "CN - Restyle (keep structure)" => { "steps" => 30, "cfg_scale" => 7.5, "strength" => 0.65, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sd", "cn_strength" => 0.7, "cn_canny" => true },
-  "CN - Creative (loose guide)" => { "steps" => 35, "cfg_scale" => 8.0, "strength" => 0.8, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd", "cn_strength" => 0.5, "cn_canny" => true },
+  "CN - Face Preserve" => { "steps" => 30, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "strength" => 0.4, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd", "cn_strength" => 0.85, "cn_canny" => true },
+  "CN - Restyle (keep structure)" => { "steps" => 30, "cfg_scale" => 7.5, "width" => 512, "height" => 512, "strength" => 0.65, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sd", "cn_strength" => 0.7, "cn_canny" => true },
+  "CN - Creative (loose guide)" => { "steps" => 35, "cfg_scale" => 8.0, "width" => 512, "height" => 512, "strength" => 0.8, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd", "cn_strength" => 0.5, "cn_canny" => true },
   # --- img2img (FLUX) ---
+  "FLUX Edit - Face (safe)" => { "steps" => 40, "cfg_scale" => 1.0, "strength" => 0.35, "guidance" => 4.5, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
+  "FLUX Edit - Face (stronger)" => { "steps" => 40, "cfg_scale" => 1.0, "strength" => 0.45, "guidance" => 5.5, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
   "FLUX Edit - Subtle" => { "steps" => 28, "cfg_scale" => 1.0, "strength" => 0.5, "guidance" => 5.0, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
   "FLUX Edit - Balanced" => { "steps" => 28, "cfg_scale" => 1.0, "strength" => 0.75, "guidance" => 7.0, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
   "FLUX Edit - Creative" => { "steps" => 35, "cfg_scale" => 1.0, "strength" => 0.9, "guidance" => 10.0, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
+  # --- Inpainting ---
+  "Inpaint - Face Preserve" => { "steps" => 30, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "strength" => 0.75, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd", "auto_mask" => "center_preserve" },
+  "Inpaint - Background Only" => { "steps" => 35, "cfg_scale" => 7.5, "width" => 512, "height" => 512, "strength" => 0.85, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sd", "auto_mask" => "center_preserve" },
   # --- FLUX ---
   "FLUX - Quick" => { "steps" => 4, "cfg_scale" => 1.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
   "FLUX - Balanced" => { "steps" => 8, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
@@ -260,13 +265,13 @@ RECOMMENDED_LORAS = [
   },
 ].freeze
 
-# Curated list of recommended ControlNet models
+# Curated list of recommended ControlNet models (.pth checkpoint format for sd.cpp)
 RECOMMENDED_CONTROLNETS = [
   {
     name: "Canny Edge (SD 1.5)",
-    repo: "afrideva/control_v11p_sd15_canny-controlnet-gguf",
-    file: "control_v11p_sd15_canny-Q8_0.gguf",
-    size: 1_450_000_000,
+    repo: "lllyasviel/ControlNet-v1-1",
+    file: "control_v11p_sd15_canny.pth",
+    size: 1_445_000_000,
     model_family: "SD 1.x",
     control_type: :canny,
     desc: "Preserves edges and structure — best for face/pose preservation",
@@ -274,9 +279,9 @@ RECOMMENDED_CONTROLNETS = [
   },
   {
     name: "Depth (SD 1.5)",
-    repo: "afrideva/control_v11f1p_sd15_depth-controlnet-gguf",
-    file: "control_v11f1p_sd15_depth-Q8_0.gguf",
-    size: 1_450_000_000,
+    repo: "lllyasviel/ControlNet-v1-1",
+    file: "control_v11f1p_sd15_depth.pth",
+    size: 1_445_000_000,
     model_family: "SD 1.x",
     control_type: :depth,
     desc: "Preserves spatial depth — good for scenes and landscapes",
@@ -284,9 +289,9 @@ RECOMMENDED_CONTROLNETS = [
   },
   {
     name: "OpenPose (SD 1.5)",
-    repo: "afrideva/control_v11p_sd15_openpose-controlnet-gguf",
-    file: "control_v11p_sd15_openpose-Q8_0.gguf",
-    size: 1_450_000_000,
+    repo: "lllyasviel/ControlNet-v1-1",
+    file: "control_v11p_sd15_openpose.pth",
+    size: 1_445_000_000,
     model_family: "SD 1.x",
     control_type: :openpose,
     desc: "Preserves body pose — restyle people while keeping their pose",
