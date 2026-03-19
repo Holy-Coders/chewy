@@ -291,15 +291,10 @@ class Chewy
       logo = Theme.gradient_text(" chewy ", Theme.PRIMARY, Theme.ACCENT)
       dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
 
-      # Provider badge for remote providers
-      provider_badge = if @provider.provider_type == :api
-        prov_label = Lipgloss::Style.new.background(Theme.SECONDARY).foreground(Theme.BAR_TEXT).bold(true)
-          .render(" #{@provider.display_name} ")
-        model_name = @remote_model_id || @provider.list_models.first&.dig(:id) || "default"
-        " #{dim.render("\u2502")} #{prov_label} #{Lipgloss::Style.new.foreground(Theme.TEXT).bold(true).render(model_name)}"
-      else
-        ""
-      end
+      # Provider pill — always shown
+      prov_pill = Lipgloss::Style.new.background(Theme.SECONDARY).foreground(Theme.BAR_TEXT).bold(true)
+        .render(" #{@provider.display_name} ")
+      provider_section = " #{dim.render("\u2502")} #{prov_pill}"
 
       model_info = if @provider.provider_type == :local
         if @selected_model_path
@@ -312,20 +307,21 @@ class Chewy
           type_label = if is_flux || cached_type == "FLUX"
             ok = flux_companions_present?
             pill_bg = ok ? Theme.SUCCESS : Theme.WARNING
-            " #{Lipgloss::Style.new.background(pill_bg).foreground(Theme.SURFACE).bold(true).render(" FLUX ")}"
-          elsif quant
-            " #{Lipgloss::Style.new.background(Theme.SECONDARY).foreground(Theme.BAR_TEXT).bold(true).render(" #{quant} ")}"
+            Lipgloss::Style.new.background(pill_bg).foreground(Theme.SURFACE).bold(true).render(" FLUX ")
           elsif cached_type
-            " #{Lipgloss::Style.new.background(Theme.SECONDARY).foreground(Theme.BAR_TEXT).render(" #{cached_type} ")}"
+            Lipgloss::Style.new.background(Theme.SECONDARY).foreground(Theme.BAR_TEXT).render(" #{cached_type} ")
+          elsif quant
+            Lipgloss::Style.new.background(Theme.SECONDARY).foreground(Theme.BAR_TEXT).bold(true).render(" #{quant} ")
           else
-            " #{Lipgloss::Style.new.background(Theme.BORDER_DIM).foreground(Theme.TEXT).render(" SD ")}"
+            Lipgloss::Style.new.background(Theme.BORDER_DIM).foreground(Theme.TEXT).render(" SD ")
           end
-          " #{dim.render("\u2502")} #{Lipgloss::Style.new.foreground(Theme.TEXT).bold(true).render(name)}#{type_label}"
+          " #{dim.render("\u2502")} #{type_label} #{Lipgloss::Style.new.foreground(Theme.TEXT).bold(true).render(name)}"
         else
           " #{dim.render("\u2502")} #{dim.render("no model selected")}"
         end
       else
-        provider_badge
+        model_name = @remote_model_id || @provider.list_models.first&.dig(:id) || "default"
+        " #{dim.render("\u2502")} #{Lipgloss::Style.new.foreground(Theme.TEXT).bold(true).render(model_name)}"
       end
 
       img2img_badge = if @init_image_path && @provider.capabilities.img2img
@@ -346,7 +342,7 @@ class Chewy
         ""
       end
 
-      left = "#{logo}#{model_info}#{img2img_badge}#{controlnet_badge}"
+      left = "#{logo}#{provider_section}#{model_info}#{img2img_badge}#{controlnet_badge}"
 
       if narrow?
         # Truncate left content to fit and skip right-side hints
