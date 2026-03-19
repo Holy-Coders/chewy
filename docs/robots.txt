@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://chewytui.xyz/sitemap.xml
