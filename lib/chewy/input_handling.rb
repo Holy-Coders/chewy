@@ -344,6 +344,8 @@ class Chewy
         @params[key] = new_val.clamp(1, 9)
       elsif key == :strength
         @params[key] = new_val.to_f.clamp(0.01, 1.0)
+      elsif key == :guidance
+        @params[key] = new_val.to_f.clamp(1.0, 30.0)
       elsif key == :threads
         @params[key] = new_val.clamp(1, Etc.nprocessors)
       elsif new_val > 0

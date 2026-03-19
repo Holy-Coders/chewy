@@ -81,6 +81,10 @@ class Chewy
       keys << :scheduler if caps.scheduler
       keys << :batch if caps.batch
       keys << :strength if caps.strength
+      # Guidance is FLUX-specific (separate from cfg_scale)
+      if @provider.provider_type == :local && @selected_model_path && flux_model?(@selected_model_path)
+        keys << :guidance
+      end
       keys << :threads if caps.threads
       if caps.controlnet
         keys << :cn_model

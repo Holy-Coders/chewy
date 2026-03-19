@@ -92,6 +92,7 @@ class Chewy
         strength: @params[:strength], threads: @params[:threads],
         loras: @selected_loras, output_dir: @output_dir,
         is_flux: is_flux,
+        guidance: is_flux ? @params[:guidance] : nil,
         flux_clip_l: is_flux ? flux_companion_path("clip_l") : nil,
         flux_t5xxl: is_flux ? flux_companion_path("t5xxl") : nil,
         flux_vae: is_flux ? flux_companion_path("vae") : nil,

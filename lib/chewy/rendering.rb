@@ -868,6 +868,7 @@ class Chewy
       when :sampler then "Sampler  "
       when :batch then "Batch    "
       when :strength then "Strength "
+      when :guidance then "Guidance "
       when :scheduler then "Schedule "
       when :threads then "Threads  "
       when :cn_model then "CN Model "

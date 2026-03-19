@@ -22,7 +22,7 @@ module Provider
     :prompt, :negative_prompt, :model, :steps, :cfg_scale,
     :width, :height, :seed, :sampler, :scheduler, :batch,
     :init_image, :strength, :threads, :loras, :output_dir,
-    :is_flux, :flux_clip_l, :flux_t5xxl, :flux_vae,
+    :is_flux, :flux_clip_l, :flux_t5xxl, :flux_vae, :guidance,
     :controlnet_model, :controlnet_image, :controlnet_strength, :controlnet_canny,
     keyword_init: true
   )
@@ -195,7 +195,7 @@ class LocalSdCppProvider < Provider::Base
        "--clip_l", request.flux_clip_l, "--t5xxl", request.flux_t5xxl, "--vae", request.flux_vae,
        "-p", request.prompt,
        "--steps", request.steps.to_s, "--cfg-scale", request.cfg_scale.to_s,
-       "--guidance", "3.5",
+       "--guidance", (request.guidance || 3.5).to_s,
        "-W", request.width.to_s, "-H", request.height.to_s,
        "--seed", request.seed.to_s, "--sampling-method", request.sampler,
        "--scheduler", request.scheduler,

@@ -462,6 +462,7 @@ class Chewy
         @scheduler_index = SCHEDULER_OPTIONS.index(@scheduler) || 0
       end
       @params[:strength] = d["strength"].to_f if d["strength"]
+      @params[:guidance] = d["guidance"].to_f if d["guidance"]
 
       # Model selection: exact path (user presets) or type match (builtins)
       if d["model"] && File.exist?(d["model"])

@@ -36,11 +36,15 @@ BUILTIN_PRESETS = {
   "Landscape" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 768, "height" => 512, "sampler" => "euler_a", "scheduler" => "karras", "model_type" => "sd" },
   "Widescreen (16:9)" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 896, "height" => 512, "sampler" => "dpm++2m", "scheduler" => "karras" },
   "Square HD" => { "steps" => 25, "cfg_scale" => 7.0, "width" => 1024, "height" => 1024, "sampler" => "dpm++2m", "scheduler" => "karras", "model_type" => "sdxl" },
-  # --- img2img ---
+  # --- img2img (SD/SDXL) ---
   "Image Edit - Quick" => { "steps" => 20, "cfg_scale" => 7.0, "strength" => 0.5, "sampler" => "euler_a", "scheduler" => "karras" },
   "Image Edit - High Quality" => { "steps" => 35, "cfg_scale" => 7.0, "strength" => 0.65, "sampler" => "dpm++2m", "scheduler" => "karras" },
   "Image Edit - Creative" => { "steps" => 30, "cfg_scale" => 8.0, "strength" => 0.85, "sampler" => "euler_a", "scheduler" => "karras" },
   "Image Edit - Subtle" => { "steps" => 25, "cfg_scale" => 7.0, "strength" => 0.3, "sampler" => "dpm++2m", "scheduler" => "karras" },
+  # --- img2img (FLUX) ---
+  "FLUX Edit - Subtle" => { "steps" => 28, "cfg_scale" => 1.0, "strength" => 0.5, "guidance" => 5.0, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
+  "FLUX Edit - Balanced" => { "steps" => 28, "cfg_scale" => 1.0, "strength" => 0.75, "guidance" => 7.0, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
+  "FLUX Edit - Creative" => { "steps" => 35, "cfg_scale" => 1.0, "strength" => 0.9, "guidance" => 10.0, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
   # --- FLUX ---
   "FLUX - Quick" => { "steps" => 4, "cfg_scale" => 1.0, "width" => 512, "height" => 512, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
   "FLUX - Balanced" => { "steps" => 8, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple", "model_type" => "flux" },
@@ -105,7 +109,7 @@ MODEL_BEST_SETTINGS = {
 
 # Recommended img2img settings per model type — higher steps + tuned strength
 IMG2IMG_BEST_SETTINGS = {
-  "FLUX"   => { "steps" => 20, "cfg_scale" => 1.0, "strength" => 0.6, "sampler" => "euler", "scheduler" => "simple" },
+  "FLUX"   => { "steps" => 28, "cfg_scale" => 1.0, "strength" => 0.75, "guidance" => 7.0, "sampler" => "euler", "scheduler" => "simple" },
   "SDXL"   => { "steps" => 30, "cfg_scale" => 7.0, "strength" => 0.7, "sampler" => "dpm++2m", "scheduler" => "karras" },
   "SD 1.x" => { "steps" => 30, "cfg_scale" => 7.0, "strength" => 0.75, "sampler" => "euler_a", "scheduler" => "karras" },
   "SD 2.x" => { "steps" => 30, "cfg_scale" => 7.0, "strength" => 0.7, "sampler" => "euler_a", "scheduler" => "karras" },

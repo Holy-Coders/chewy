@@ -96,6 +96,7 @@ class Chewy
     dw = @config["default_width"] || 512
     dh = @config["default_height"] || 512
     @params = { steps: ds, cfg_scale: dc, width: dw, height: dh, seed: -1, batch: 1, strength: 0.75,
+                 guidance: (@config["default_guidance"] || 3.5).to_f,
                  threads: @config["default_threads"] || Etc.nprocessors }
     @sampler = @config["default_sampler"] || "euler_a"
     @sampler_index = SAMPLER_OPTIONS.index(@sampler) || 1
