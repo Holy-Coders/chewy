@@ -412,6 +412,23 @@
       </ul>
       <p>Themes affect the entire interface including the status bar, overlays, and CLI commands (help, list, etc.).</p>
 
+      <h3>Custom Themes</h3>
+      <p>Drop a YAML file in <code>~/.config/chewy/themes/</code> with 13 color keys and it will appear in the theme picker. Example <code>~/.config/chewy/themes/cyberpunk.yml</code>:</p>
+      <pre><code>primary: "#00FF41"
+secondary: "#008F11"
+accent: "#FF0090"
+success: "#00FF41"
+warning: "#FFD300"
+error: "#FF0000"
+text: "#E0E0E0"
+text_dim: "#808080"
+text_muted: "#505050"
+surface: "#0D0D0D"
+border_dim: "#333333"
+border_focus: "#00FF41"
+bar_text: "#000000"</code></pre>
+      <p>Custom themes show a <strong>custom</strong> badge in the picker. All 13 keys are required. Files with missing keys or bad YAML are silently skipped.</p>
+
       <h2 id="gallery">Gallery</h2>
       <p>Press <code>^a</code> to open the gallery, which shows all your generated images. Navigate with arrow keys or <code>j</code>/<code>k</code>.</p>
       <ul>
