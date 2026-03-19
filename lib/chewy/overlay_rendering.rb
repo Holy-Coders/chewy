@@ -684,6 +684,42 @@ class Chewy
       end
     end
 
+    HELP_SECTIONS = [
+      ["Generation", [
+        ["enter", "Generate image"],
+        ["^x", "Cancel generation"],
+        ["^w", "Clear prompt & image (new start)"],
+        ["^r", "Randomize seed"],
+      ]],
+      ["Navigation", [
+        ["tab", "Cycle focus (prompt / negative / params)"],
+        ["shift+tab", "Cycle focus backwards"],
+        ["up/down", "Prompt history (in prompt field)"],
+        ["j/k", "Navigate params (in params)"],
+        ["h/l", "Adjust param value (in params)"],
+      ]],
+      ["Overlays", [
+        ["^n", "Model picker"],
+        ["^d", "Download models"],
+        ["^l", "LoRA selector"],
+        ["^p", "Presets"],
+        ["^t", "Theme picker"],
+        ["^y", "Switch provider"],
+        ["^a", "Gallery"],
+      ]],
+      ["Image", [
+        ["^b", "Browse for init image (img2img)"],
+        ["^v", "Paste (text in prompt, image elsewhere)"],
+        ["^u", "Clear init image"],
+        ["^e", "Open last image in viewer"],
+        ["^f", "Fullscreen image preview"],
+      ]],
+      ["App", [
+        ["F1", "Toggle this help"],
+        ["^q", "Quit"],
+      ]],
+    ].freeze
+
     def render_help_view
       @help_scroll ||= 0
       key_style = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
