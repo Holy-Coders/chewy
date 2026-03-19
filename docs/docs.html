@@ -415,6 +415,16 @@
       <p>White pixels in the mask = regenerate, black = keep. The <strong>mask painter</strong> lets you click on the image to select which areas to change.</p>
       <p>Built-in presets: "Inpaint - Face Preserve" and "Inpaint - Background Only" auto-generate a center mask and configure optimal settings.</p>
 
+      <h2 id="prompt-ai">AI Prompt Enhancement</h2>
+      <p>Chewy can enhance your prompts using a local or cloud LLM. From the prompt field:</p>
+      <ul>
+        <li><code>alt+e</code> — Enhance your prompt (adds detail, lighting, quality tags)</li>
+        <li><code>alt+n</code> — Auto-generate a negative prompt</li>
+        <li><code>alt+r</code> — Generate a random creative prompt from scratch</li>
+      </ul>
+      <p>Or click the <strong>✨ Enhance</strong> / <strong>✨ Generate</strong> button in the prompt box.</p>
+      <p>LLM priority: local (ollama, LM Studio, llama.cpp) → OpenAI → Gemini → rule-based fallback. For local: <code>brew install ollama && ollama pull llama3.2:3b</code>.</p>
+
       <!-- Interface -->
 
       <h2 id="themes">Themes</h2>

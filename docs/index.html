@@ -672,7 +672,7 @@
   <!-- Hero -->
   <section class="hero">
     <div class="container">
-      <div class="hero-badge" id="version-badge">v0.8.0 &mdash; Inpainting with mask painter, ControlNet downloads, FLUX guidance</div>
+      <div class="hero-badge" id="version-badge">v0.10.1 &mdash; AI prompt enhancement, starter packs, inpainting, mask painter</div>
       <h1>AI image generation<br><span class="gradient">in your terminal.</span></h1>
       <p>Chewy is a beautiful TUI for generating images with Stable Diffusion, FLUX, DALL-E, Imagen, and more. Run locally or connect to cloud providers &mdash; your choice.</p>
       <div class="hero-actions">
@@ -783,8 +783,8 @@
         </div>
         <div class="feature-card">
           <div class="feature-icon" style="background:#bd93f922;color:#bd93f9;">&#x1f5bc;</div>
-          <h3>img2img, Inpainting, LoRAs & More</h3>
-          <p>Use images as starting points. Inpainting with a click-to-paint mask editor preserves faces while changing everything else. LoRAs with adjustable weights. Prompt history persists across sessions.</p>
+          <h3>AI Prompts, Inpainting, LoRAs & More</h3>
+          <p>AI-powered prompt enhancement using local LLMs (ollama) or cloud APIs. Click-to-paint mask editor for face-preserving inpainting. img2img, LoRAs with adjustable weights, and prompt history.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon" style="background:#50fa7b22;color:var(--success);">&#x1f5a5;</div>
@@ -946,7 +946,7 @@
         if (data.tag_name) {
           var version = data.tag_name.replace(/^v/, '');
           var badge = document.getElementById('version-badge');
-          badge.textContent = 'v' + version + ' \u2014 Inpainting with mask painter, ControlNet downloads, FLUX guidance';
+          badge.textContent = 'v' + version + ' \u2014 AI prompt enhancement, starter packs, inpainting, mask painter';
         }
       })
       .catch(function() {});

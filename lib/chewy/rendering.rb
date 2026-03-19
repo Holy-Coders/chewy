@@ -669,7 +669,26 @@ class Chewy
       end
 
       label_style = Lipgloss::Style.new.foreground(focused ? Theme.PRIMARY : Theme.TEXT_DIM).bold(focused)
-      label = label_style.render("Prompt")
+      inner_w = tw - 4  # width inside the border + padding
+
+      # AI enhance button — right-aligned on the label row
+      ai_button = if @prompt_enhancing
+        "#{@spinner.view} #{Lipgloss::Style.new.foreground(Theme.TEXT_DIM).italic(true).render("enhancing...")}"
+      elsif focused
+        btn_text = @prompt_input.value.strip.empty? ? " \u2728 Generate " : " \u2728 Enhance "
+        Lipgloss::Style.new.background(Theme.PRIMARY).foreground(Theme.BAR_TEXT).bold(true).render(btn_text)
+      else
+        nil
+      end
+
+      if ai_button
+        label_text = "Prompt"
+        btn_visible_w = ai_button.gsub(/\e\[[0-9;]*[A-Za-z]/, "").length
+        gap = [inner_w - label_text.length - btn_visible_w, 1].max
+        label_row = "#{label_style.render(label_text)}#{' ' * gap}#{ai_button}"
+      else
+        label_row = label_style.render("Prompt")
+      end
 
       lora_tags = if @selected_loras.any?
         pill = Lipgloss::Style.new.background(Theme.ACCENT).foreground(Theme.SURFACE).bold(true)
@@ -688,9 +707,27 @@ class Chewy
       end
       extra_lines = lora_tags.count("\n") + (chips_line.empty? ? 0 : chips_line.count("\n") + 2)
 
+      # Register AI button click target — right-aligned on the label row
+      if focused && !@prompt_enhancing
+        btn_text = @prompt_input.value.strip.empty? ? " \u2728 Generate " : " \u2728 Enhance "
+        btn_visible_w = btn_text.length
+        # Button X position: outer_padding(2) + border(1) + inner gap pushes it right
+        btn_x_end = 2 + tw - 2  # right edge of the box content area
+        btn_x_start = btn_x_end - btn_visible_w
+        # Button Y position: outer_padding(1) + header(1) + border(1) = row 3 is the label row
+        btn_y = 1 + 1 + 1  # outer_pad_top + header_row + border_top
+        @chip_hit_map << {
+          y: btn_y,
+          x_start: btn_x_start,
+          x_end: btn_x_end,
+          chip: :ai_enhance,
+          target: :ai_enhance,
+        }
+      end
+
       prompt_lines = [box_h - 4 - extra_lines, 1].max
       prompt_view = render_wrapped_input(@prompt_input, max_lines: prompt_lines)
-      content = "#{label}\n#{prompt_view}#{lora_tags}"
+      content = "#{label_row}\n#{prompt_view}#{lora_tags}"
       unless chips_line.empty?
         content += "\n\n#{chips_line}"
         actual_lines = prompt_view.count("\n") + 1

@@ -35,7 +35,9 @@ class Chewy
       y = message.y
 
       # Check chip clicks first — uses absolute coordinates stored during render
-      return [self, nil] if handle_chip_click(x, y)
+      if handle_chip_click(x, y)
+        return @_chip_click_result || [self, nil]
+      end
 
       # Account for padding: 2 chars left, 1 line top
       cx = x - 2
@@ -492,6 +494,17 @@ class Chewy
       hit = @chip_hit_map.find { |h| h[:y] == y && x >= h[:x_start] && x <= h[:x_end] }
       return false unless hit
 
+      # AI enhance button — return the [self, cmd] directly
+      if hit[:target] == :ai_enhance
+        @_chip_click_result = if @prompt_input.value.strip.empty?
+          generate_random_prompt
+        else
+          enhance_prompt
+        end
+        return true
+      end
+
+      @_chip_click_result = nil
       input = hit[:target] == :prompt ? @prompt_input : @negative_input
       current = input.value
       chip = hit[:chip]

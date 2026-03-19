@@ -85,6 +85,9 @@ API keys are entered in-app (stored securely with chmod 600) or via environment 
 | `^x` | Cancel generation |
 | `^w` | Clear prompt and image (start fresh) |
 | `^r` | Randomize seed |
+| `alt+e` | AI enhance prompt |
+| `alt+n` | AI generate negative prompt |
+| `alt+r` | AI random creative prompt |
 | `F1` | Help overlay (all shortcuts) |
 | `^q` | Quit |
 
@@ -145,6 +148,17 @@ CLI commands (help, list, etc.) also use your selected theme colors. An animated
 ### Presets
 
 Press `^p` to open the preset picker. Built-in presets include fast, quality, portrait, flux-fast, and flux-quality configurations. Save your own custom presets with your preferred settings.
+
+### AI Prompt Enhancement
+
+Chewy can enhance your prompts, generate negative prompts, and create random creative prompts using a local or cloud LLM.
+
+- `alt+e` — Enhance your prompt (adds detail, lighting, composition, quality tags)
+- `alt+n` — Auto-generate a negative prompt from your positive prompt
+- `alt+r` — Generate a random creative prompt from scratch
+- Click the **✨ Enhance** / **✨ Generate** button in the prompt box
+
+**LLM priority:** Local (ollama/LM Studio) → OpenAI → Gemini → rule-based fallback. For the best local experience: `brew install ollama && ollama pull llama3.2:3b`.
 
 ### Prompt History
 
