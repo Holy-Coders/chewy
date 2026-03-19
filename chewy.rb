@@ -1508,7 +1508,7 @@ class Chewy
     @kitty_overlay_pending = nil  # {path:, row:, col:, w:, h:, slot:} set during view, processed after lipgloss
 
     # Models
-    @models_dir = ENV["CHEWY_MODELS_DIR"] || @config["model_dir"] || File.expand_path("~/models")
+    @models_dir = File.expand_path(ENV["CHEWY_MODELS_DIR"] || @config["model_dir"] || "~/models")
     @selected_model_path = nil
     @model_list = nil
     @model_paths = []
@@ -1575,8 +1575,8 @@ class Chewy
     # Paths
     bundled_sd = File.join(__dir__, "bin", "sd")
     @sd_bin = ENV["SD_BIN"] || @config["sd_bin"] || (File.executable?(bundled_sd) ? bundled_sd : "sd")
-    @output_dir = ENV["CHEWY_OUTPUT_DIR"] || @config["output_dir"] || "outputs"
-    @lora_dir = ENV["CHEWY_LORA_DIR"] || @config["lora_dir"] || File.expand_path("~/loras")
+    @output_dir = File.expand_path(ENV["CHEWY_OUTPUT_DIR"] || @config["output_dir"] || "outputs")
+    @lora_dir = File.expand_path(ENV["CHEWY_LORA_DIR"] || @config["lora_dir"] || "~/loras")
 
     # Providers
     @providers = build_providers
@@ -2663,7 +2663,7 @@ class Chewy
   # ========== Prompt History ==========
 
   def load_prompt_history_from_disk
-    dir = ENV["CHEWY_OUTPUT_DIR"] || @config["output_dir"] || "outputs"
+    dir = File.expand_path(ENV["CHEWY_OUTPUT_DIR"] || @config["output_dir"] || "outputs")
     return [] unless File.directory?(dir)
 
     jsons = Dir.glob(File.join(dir, "*.json")).sort # oldest first
@@ -7194,7 +7194,7 @@ end
 
 def cli_output_dir
   config = File.exist?(CONFIG_PATH) ? (YAML.safe_load(File.read(CONFIG_PATH)) || {}) : {}
-  ENV["CHEWY_OUTPUT_DIR"] || config["output_dir"] || "outputs"
+  File.expand_path(ENV["CHEWY_OUTPUT_DIR"] || config["output_dir"] || "outputs")
 end
 
 def cli_list_images
