@@ -72,6 +72,18 @@ class Chewy
       result
     end
 
+    def render_low_memory_popup
+      warn_style = Lipgloss::Style.new.foreground(Theme.ERROR).bold(true)
+      dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+      lines = []
+      lines << ""
+      lines << warn_style.render("Low memory warning")
+      lines << dim.render(@low_memory_warning) if @low_memory_warning
+      lines << ""
+      lines << dim.render("Generation may be slow or crash.")
+      lines.join("\n")
+    end
+
     def render_best_settings_popup
       type = @pending_best_settings_type
       source = @pending_best_settings_img2img ? IMG2IMG_BEST_SETTINGS : MODEL_BEST_SETTINGS

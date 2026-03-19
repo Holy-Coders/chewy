@@ -177,6 +177,17 @@ class Chewy
     def handle_main_key(message)
       key = message.to_s
 
+      # Handle low memory warning confirmation
+      if @confirm_low_memory
+        if key == "y"
+          # User chose to proceed despite low memory — start_generation will skip the check
+          return start_generation
+        end
+        @confirm_low_memory = false
+        @low_memory_warning = nil
+        return [self, nil]
+      end
+
       # Handle img2img best-settings confirmation on main view
       if @confirm_apply_best_settings && @pending_best_settings_img2img
         source = IMG2IMG_BEST_SETTINGS[@pending_best_settings_type]

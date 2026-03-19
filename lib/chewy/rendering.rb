@@ -255,7 +255,9 @@ class Chewy
       end
 
       result = Lipgloss.join_vertical(:left, header, body, bottom)
-      if @confirm_apply_best_settings && @pending_best_settings_img2img
+      if @confirm_low_memory
+        result += render_low_memory_popup
+      elsif @confirm_apply_best_settings && @pending_best_settings_img2img
         result += render_best_settings_popup
       end
 
@@ -938,6 +940,11 @@ class Chewy
     end
 
     def render_bottom_bar
+      if @confirm_low_memory
+        bar = Lipgloss::Style.new.background(Theme.ERROR).foreground(Theme.BAR_TEXT).width(@width).padding(0, 1)
+        return bar.render("y: generate anyway | any key: cancel")
+      end
+
       if @confirm_apply_best_settings && @pending_best_settings_img2img
         bar = Lipgloss::Style.new.background(Theme.SURFACE).foreground(Theme.TEXT).width(@width).padding(0, 1)
         return bar.render("y: apply img2img settings | any key: skip")

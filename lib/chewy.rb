@@ -262,6 +262,10 @@ class Chewy
     @pending_best_settings_type = nil
     @pending_best_settings_img2img = false
 
+    # Low memory warning — warn but let user proceed
+    @confirm_low_memory = false
+    @low_memory_warning = nil
+
     # FLUX companion downloads
     @companion_downloading = false
     @companion_remaining = 0

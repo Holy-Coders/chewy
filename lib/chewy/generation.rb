@@ -31,8 +31,8 @@ class Chewy
         return [self, set_error_toast("Mask requires an init image — press ^b to browse")]
       end
 
-      # Memory safety check for local models
-      if @provider.provider_type == :local && @selected_model_path
+      # Memory warning for local models — warn but allow user to proceed
+      if @provider.provider_type == :local && @selected_model_path && !@confirm_low_memory
         model_size = File.size(@selected_model_path) rescue 0
         available_mem = estimate_available_memory
         # Model needs roughly 1.5x its file size in RAM (weights + workspace)
@@ -40,9 +40,13 @@ class Chewy
         if available_mem > 0 && estimated_need > available_mem
           model_gb = (model_size / 1_073_741_824.0).round(1)
           avail_gb = (available_mem / 1_073_741_824.0).round(1)
-          return [self, set_error_toast("#{File.basename(@selected_model_path)} needs ~#{model_gb}GB but only #{avail_gb}GB available — close apps or use a smaller model")]
+          @confirm_low_memory = true
+          @low_memory_warning = "#{File.basename(@selected_model_path)} needs ~#{model_gb}GB but only #{avail_gb}GB available"
+          return [self, nil]
         end
       end
+      @confirm_low_memory = false
+      @low_memory_warning = nil
 
       # Warn if selected LoRAs appear incompatible with the model architecture
       if @selected_loras.any? && @provider.provider_type == :local && @selected_model_path
