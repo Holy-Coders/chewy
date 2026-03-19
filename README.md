@@ -72,7 +72,7 @@ API keys are entered in-app (stored securely with chmod 600) or via environment 
 | `^y` | Switch provider |
 | `^n` | Open model picker |
 | `^d` | Download models (HuggingFace / CivitAI) |
-| `^t` | Theme picker (10 themes) |
+| `^t` | Theme picker (10 built-in + custom themes) |
 | `^a` | Gallery |
 | `^g` | Generation history |
 | `^b` | Browse for init image (img2img) |
@@ -110,7 +110,27 @@ Press `d` in the LoRA panel to browse recommended LoRAs or search HuggingFace an
 
 ### Themes
 
-10 built-in color themes: Midnight (default), Dracula, Catppuccin, Tokyo Night, Gruvbox, Nord, Rose Pine, Solarized, Horizon, and Light. Press `^t` to switch. CLI commands (help, list, etc.) also use your selected theme colors. An animated pixel-art splash screen greets you on startup.
+10 built-in color themes: Midnight (default), Dracula, Catppuccin, Tokyo Night, Gruvbox, Nord, Rose Pine, Solarized, Horizon, and Light. Press `^t` to switch.
+
+**Custom themes:** Drop a YAML file in `~/.config/chewy/themes/` with 13 color keys and it appears in the theme picker. Example `~/.config/chewy/themes/cyberpunk.yml`:
+
+```yaml
+primary: "#00FF41"
+secondary: "#008F11"
+accent: "#FF0090"
+success: "#00FF41"
+warning: "#FFD300"
+error: "#FF0000"
+text: "#E0E0E0"
+text_dim: "#808080"
+text_muted: "#505050"
+surface: "#0D0D0D"
+border_dim: "#333333"
+border_focus: "#00FF41"
+bar_text: "#000000"
+```
+
+CLI commands (help, list, etc.) also use your selected theme colors. An animated pixel-art splash screen greets you on startup.
 
 ### Presets
 

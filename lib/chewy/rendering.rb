@@ -568,6 +568,7 @@ class Chewy
         ["^n", "select model"],
         ["^d", "download models"],
         ["^p", "load preset"],
+        ["^t", "themes (custom supported)"],
       ]
       hint_lines = hints.map { |k, d| "#{key_style.render(k.ljust(7))} #{desc_style.render(d)}" }
       max_hint_w = hints.map { |k, d| 7 + 1 + d.length }.max

@@ -724,6 +724,7 @@ class Chewy
       lines = THEME_NAMES.each_with_index.map do |name, i|
         theme = THEMES[name]
         selected = i == @theme_index
+        badge = BUILTIN_THEMES.key?(name) ? "" : Lipgloss::Style.new.foreground(Theme.SUCCESS).render(" custom")
 
         # Color swatch: show key colors as colored blocks
         swatch = [
@@ -734,10 +735,10 @@ class Chewy
         if selected
           cursor = Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true).render("> ")
           label = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true).render(name)
-          "#{cursor}#{label}\n    #{swatch}"
+          "#{cursor}#{label}#{badge}\n    #{swatch}"
         else
           dim_label = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render(name)
-          "  #{dim_label}\n    #{swatch}"
+          "  #{dim_label}#{badge}\n    #{swatch}"
         end
       end
 

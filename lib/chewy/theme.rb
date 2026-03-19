@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-THEMES = {
+BUILTIN_THEMES = {
   "midnight" => {
     "primary" => "#874BFD", "secondary" => "#7B2FFF", "accent" => "#FF75B5",
     "success" => "#50FA7B", "warning" => "#F1FA8C", "error" => "#FF5555",
@@ -73,10 +73,15 @@ THEMES = {
   },
 }.freeze
 
-THEME_NAMES = THEMES.keys.freeze
+REQUIRED_THEME_KEYS = %w[primary secondary accent success warning error text text_dim text_muted surface border_dim border_focus bar_text].freeze
+
+THEMES = BUILTIN_THEMES.dup
+THEME_NAMES = THEMES.keys
 
 # Dynamic theme module — reads from the active theme hash
 module Theme
+  CUSTOM_THEMES_DIR = File.join(CONFIG_DIR, "themes")
+
   @current = THEMES["midnight"]
 
   def self.set(name)
@@ -115,4 +120,26 @@ module Theme
       Lipgloss::Style.new.foreground(colors[[i, colors.length - 1].min]).render(ch)
     }.join
   end
+
+  def self.load_custom_themes
+    return unless File.directory?(CUSTOM_THEMES_DIR)
+
+    Dir.glob(File.join(CUSTOM_THEMES_DIR, "*.yml")).sort.each do |path|
+      name = File.basename(path, ".yml").tr("_-", "  ").gsub(/  +/, " ").strip
+      next if name.empty?
+      next if BUILTIN_THEMES.key?(name)
+
+      data = YAML.safe_load(File.read(path))
+      next unless data.is_a?(Hash)
+      next unless REQUIRED_THEME_KEYS.all? { |k| data.key?(k) }
+
+      THEMES[name] = data
+    rescue
+      next
+    end
+
+    THEME_NAMES.replace(THEMES.keys)
+  end
 end
+
+Theme.load_custom_themes
