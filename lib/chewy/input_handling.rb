@@ -84,6 +84,7 @@ class Chewy
             @prompt_input.focus
             @negative_input.blur
           end
+          move_cursor_to_click(@prompt_input, body_y, cx, section_top: 0)
         elsif body_y < prompt_h + negative_h
           # Negative prompt section
           unless @focus == FOCUS_NEGATIVE
@@ -91,6 +92,7 @@ class Chewy
             @negative_input.focus
             @prompt_input.blur
           end
+          move_cursor_to_click(@negative_input, body_y, cx, section_top: prompt_h)
         else
           # Params section
           was_focused = @focus == FOCUS_PARAMS
@@ -131,6 +133,48 @@ class Chewy
       end
 
       [self, nil]
+    end
+
+    # Place the input's cursor at the clicked position inside the prompt/negative box.
+    # body_y is the click row relative to the body area; section_top is the row where
+    # this section's box starts (0 for prompt, prompt_h for negative).
+    # cx is the click column relative to the main content area (x - 2).
+    # The box is bordered (1 row top/bottom, 1 col left/right) and has a label row
+    # directly under the top border — so text begins at local (row=2, col=1).
+    def move_cursor_to_click(input, body_y, cx, section_top:)
+      return unless input && input.value && !input.value.empty?
+      layout = @input_layouts && @input_layouts[input.object_id]
+      wrap_w = (layout && layout[:width]) || [input.width, 1].max
+      start_line = (layout && layout[:start_line]) || 0
+
+      local_y = body_y - section_top  # row within this section's box
+      text_row_visible = local_y - 2  # skip border + label rows
+      text_col = cx - 1               # skip left border
+      return if text_row_visible < 0
+
+      abs_row = start_line + text_row_visible
+      abs_col = [text_col, 0].max
+
+      value = input.value
+      chars = value.chars
+      return if chars.empty?
+
+      _lines, positions = wrapped_input_layout(value, wrap_w)
+      # Find the char index whose layout position best matches the click.
+      # Prefer exact row; break ties by closest column; clicks past end-of-line snap to end.
+      best_idx = input.position
+      best_dist = Float::INFINITY
+      positions.each_with_index do |pos, idx|
+        next unless pos
+        row_d = (pos[0] - abs_row).abs
+        col_d = (pos[1] - abs_col).abs
+        dist = row_d * 100_000 + col_d
+        if dist < best_dist
+          best_dist = dist
+          best_idx = idx
+        end
+      end
+      input.position = best_idx
     end
 
     def handle_overlay_mouse(message)
@@ -262,6 +306,9 @@ class Chewy
       when "enter" then return start_generation
       when "up"    then history_prev; return [self, nil]
       when "down"  then history_next; return [self, nil]
+      when "alt+h" then return open_prompt_search
+      when "alt+q" then return enqueue_current
+      when "alt+s" then return seed_sweep(4)
       when "alt+e" then return enhance_prompt
       when "alt+n" then return generate_negative_prompt
       when "alt+r" then return generate_random_prompt

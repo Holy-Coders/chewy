@@ -30,6 +30,7 @@ class Chewy
         "last_model" => @selected_model_path,
         "incompatible_models" => @incompatible_models || [],
         "model_types" => @model_types || {},
+        "model_sources" => @model_sources || {},
         "theme" => Theme.current_name,
         "active_provider" => @provider&.id || "local_sd_cpp",
         "remote_model" => @remote_model_id,

@@ -10,7 +10,22 @@ MODEL_EXTENSIONS = %w[.gguf .safetensors .ckpt .pth].freeze
 DOWNLOAD_SOURCES = [:huggingface, :civitai].freeze
 
 # Filename prefixes for companion/auxiliary files — excluded from model file listings
-COMPANION_FILE_PATTERNS = %w[clip_l t5xxl umt5 ae clip_vision wan_2.1_vae].freeze
+COMPANION_FILE_PATTERNS = %w[clip_l t5xxl umt5 ae clip_vision wan_2.1_vae flux2_ae flux2-vae qwen3- qwen2.5-vl qwen_image_vae taesd taef1 taesdxl realesrgan].freeze
+
+# ESRGAN upscaler model — 4x Real-ESRGAN, public mirror
+ESRGAN_MODEL = {
+  filename: "RealESRGAN_x4plus.pth",
+  url: "https://huggingface.co/leonelhs/realesrgan/resolve/main/RealESRGAN_x4plus.pth",
+  scale: 4,
+}.freeze
+
+# TAESD decoder files — used for fast preview instead of --preview proj when present.
+# Architecture → filename glob. First match wins.
+TAESD_FILES = {
+  flux:  %w[taef1*.safetensors taef1*.gguf],
+  sdxl:  %w[taesdxl*.safetensors taesdxl*.gguf],
+  sd:    %w[taesd*.safetensors taesd*.gguf],
+}.freeze
 
 # HuggingFace repo patterns known to be incompatible with sd.cpp
 INCOMPATIBLE_HF_PATTERNS = %w[whisper llama mistral phi gemma qwen deepseek codellama].freeze
@@ -110,6 +125,30 @@ MODEL_FAMILIES = {
     description: "State-of-the-art — needs companion files",
     default_resolution: [1024, 1024],
   },
+  "FLUX2" => {
+    label: "FLUX.2",
+    aliases: ["FLUX.2", "flux-2", "flux2", "flux-2-klein", "flux-2-dev", "klein"],
+    description: "FLUX.2 Klein/Dev — uses Qwen3 text encoder, different from FLUX.1",
+    default_resolution: [1024, 1024],
+  },
+  "Chroma" => {
+    label: "Chroma",
+    aliases: ["chroma", "chroma-unlocked", "chroma1", "chroma-radiance"],
+    description: "Chroma — FLUX-derived, runs on 4-6GB VRAM, reuses FLUX.1 t5xxl+vae",
+    default_resolution: [1024, 1024],
+  },
+  "Z-Image" => {
+    label: "Z-Image",
+    aliases: ["z-image", "z_image", "zimage"],
+    description: "Z-Image — low-VRAM model (4GB), Qwen3-4B text encoder",
+    default_resolution: [1024, 1024],
+  },
+  "Qwen-Image" => {
+    label: "Qwen Image",
+    aliases: ["qwen-image", "qwen_image"],
+    description: "Qwen Image — best-in-class text rendering (Chinese/English), Qwen2.5-VL encoder",
+    default_resolution: [1024, 1024],
+  },
   "Wan" => {
     label: "Wan Video",
     aliases: ["Wan2.1", "Wan2.2", "wan-t2v", "wan-i2v"],
@@ -126,6 +165,10 @@ end.freeze
 
 # Best settings per model type — applied when user confirms after selecting a model
 MODEL_BEST_SETTINGS = {
+  "FLUX2"  => { "steps" => 4, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple" },
+  "Chroma" => { "steps" => 26, "cfg_scale" => 4.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple" },
+  "Z-Image" => { "steps" => 20, "cfg_scale" => 5.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple" },
+  "Qwen-Image" => { "steps" => 20, "cfg_scale" => 2.5, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple" },
   "FLUX"   => { "steps" => 8, "cfg_scale" => 1.0, "width" => 1024, "height" => 1024, "sampler" => "euler", "scheduler" => "simple" },
   "SDXL"   => { "steps" => 25, "cfg_scale" => 7.0, "width" => 1024, "height" => 1024, "sampler" => "dpm++2m", "scheduler" => "karras" },
   "SD 1.x" => { "steps" => 20, "cfg_scale" => 7.0, "width" => 512, "height" => 512, "sampler" => "euler_a", "scheduler" => "karras" },
@@ -157,6 +200,56 @@ FLUX_COMPANION_FILES = {
   "vae" => {
     filename: "ae.safetensors",
     url: "https://huggingface.co/second-state/FLUX.1-schnell-GGUF/resolve/main/ae.safetensors",
+  },
+}.freeze
+
+# Qwen-Image companion files — Qwen2.5-VL-7B LLM + VAE, all from public mirrors
+QWEN_IMAGE_COMPANION_FILES = {
+  "llm" => {
+    filename: "Qwen2.5-VL-7B-Instruct.Q5_K_M.gguf",
+    url: "https://huggingface.co/mradermacher/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main/Qwen2.5-VL-7B-Instruct.Q5_K_M.gguf",
+  },
+  "vae" => {
+    filename: "qwen_image_vae.safetensors",
+    url: "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+  },
+}.freeze
+
+# Z-Image companion files — reuses FLUX.1 ae.safetensors and FLUX.2 Qwen3-4B GGUF.
+# If either is already downloaded for another architecture, these are deduplicated.
+Z_IMAGE_COMPANION_FILES = {
+  "llm" => {
+    filename: "Qwen3-4B-Q4_K_M.gguf",
+    url: "https://huggingface.co/unsloth/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf",
+  },
+  "vae" => {
+    filename: "ae.safetensors",
+    url: "https://huggingface.co/second-state/FLUX.1-schnell-GGUF/resolve/main/ae.safetensors",
+  },
+}.freeze
+
+# FLUX.2 companion files — variant depends on diffusion model size
+# 4B model pairs with Qwen3-4B, 9B model pairs with Qwen3-8B. VAE is shared.
+FLUX2_COMPANION_FILES = {
+  :_9b => {
+    "llm" => {
+      filename: "Qwen3-8B-Q4_K_M.gguf",
+      url: "https://huggingface.co/unsloth/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf",
+    },
+    "vae" => {
+      filename: "flux2-vae.safetensors",
+      url: "https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/resolve/main/split_files/vae/flux2-vae.safetensors",
+    },
+  },
+  :_4b => {
+    "llm" => {
+      filename: "Qwen3-4B-Q4_K_M.gguf",
+      url: "https://huggingface.co/unsloth/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf",
+    },
+    "vae" => {
+      filename: "flux2-vae.safetensors",
+      url: "https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/resolve/main/split_files/vae/flux2-vae.safetensors",
+    },
   },
 }.freeze
 

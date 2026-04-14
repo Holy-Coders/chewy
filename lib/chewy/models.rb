@@ -8,7 +8,10 @@ class Chewy
       Dir.glob(File.join(@models_dir, "**", "*.part")).each { |f| File.delete(f) rescue nil }
 
       companion_names = FLUX_COMPANION_FILES.values.map { |v| v[:filename] } +
-                        WAN_COMPANION_FILES.values.map { |v| v[:filename] }
+                        WAN_COMPANION_FILES.values.map { |v| v[:filename] } +
+                        Z_IMAGE_COMPANION_FILES.values.map { |v| v[:filename] } +
+                        QWEN_IMAGE_COMPANION_FILES.values.map { |v| v[:filename] } +
+                        FLUX2_COMPANION_FILES.values.flat_map { |h| h.values.map { |v| v[:filename] } }.uniq
       ext_glob = "*.{safetensors,gguf,ckpt}"
 
       # Scan primary dir + any extra app directories that exist
@@ -96,6 +99,14 @@ class Chewy
       name = File.basename(path).downcase
       type = if name.include?("wan2") || name.include?("wan-") || name.include?("wan_")
         "Wan"
+      elsif name.match?(/\bz[-_]?image/)
+        "Z-Image"
+      elsif name.match?(/qwen[-_]?image/) && !name.include?("vae") && !name.include?("instruct")
+        "Qwen-Image"
+      elsif name.match?(/flux[-_]?2|klein/)
+        "FLUX2"
+      elsif name.include?("chroma")
+        "Chroma"
       elsif name.include?("flux")
         "FLUX"
       elsif name.include?("sdxl") || name.include?("sd_xl")
@@ -136,6 +147,8 @@ class Chewy
             if output.include?("Version:")
               type = if output.include?("Version: Wan") || output.include?("Version: wan")
                 "Wan"
+              elsif output.include?("Version: Flux 2") || output.include?("Version: FLUX.2")
+                "FLUX2"
               elsif output.include?("Version: Flux")
                 "FLUX"
               elsif output.include?("Version: SDXL")
@@ -198,6 +211,14 @@ class Chewy
       name = File.basename(path).downcase
       if name.include?("wan2") || name.include?("wan-") || name.include?("wan_")
         "Wan"
+      elsif name.match?(/\bz[-_]?image/)
+        "Z-Image"
+      elsif name.match?(/qwen[-_]?image/) && !name.include?("vae") && !name.include?("instruct")
+        "Qwen-Image"
+      elsif name.match?(/flux[-_]?2|klein/)
+        "FLUX2"
+      elsif name.include?("chroma")
+        "Chroma"
       elsif name.include?("flux")
         "FLUX"
       elsif name.include?("sdxl") || name.include?("sd_xl")
@@ -225,7 +246,170 @@ class Chewy
     def flux_model?(path)
       return false unless path
       basename = File.basename(path).downcase
-      basename.include?("flux")
+      basename.include?("flux") && !flux2_model?(path)
+    end
+
+    def kontext_model?(path)
+      return false unless path
+      basename = File.basename(path).downcase
+      basename.include?("kontext")
+    end
+
+    def chroma_model?(path)
+      return false unless path
+      basename = File.basename(path).downcase
+      basename.include?("chroma")
+    end
+
+    def z_image_model?(path)
+      return false unless path
+      basename = File.basename(path).downcase
+      basename.match?(/\bz[-_]?image/)
+    end
+
+    def qwen_image_model?(path)
+      return false unless path
+      basename = File.basename(path).downcase
+      basename.match?(/qwen[-_]?image/) && !basename.include?("vae") && !basename.include?("instruct")
+    end
+
+    def qwen_image_companion_path(key)
+      info = QWEN_IMAGE_COMPANION_FILES[key]
+      return nil unless info
+      File.join(@models_dir, info[:filename])
+    end
+
+    def qwen_image_companions_present?
+      QWEN_IMAGE_COMPANION_FILES.all? { |key, _| File.exist?(qwen_image_companion_path(key)) }
+    end
+
+    def missing_qwen_image_companions
+      QWEN_IMAGE_COMPANION_FILES.select { |key, _| !File.exist?(qwen_image_companion_path(key)) }
+    end
+
+    def download_qwen_image_companions
+      missing = missing_qwen_image_companions
+      return [self, nil] if missing.empty?
+
+      hf_token = resolve_hf_token
+      unless hf_token
+        @hf_token_pending_action = :qwen_image_companions
+        return open_overlay(:hf_token)
+      end
+
+      @companion_downloading = true
+      @companion_remaining = missing.size
+      @companion_errors = []
+      @companion_current_file = ""
+      @companion_dest = nil
+
+      queue = missing.to_a
+      start_next_companion_download(queue, hf_token)
+    end
+
+    def z_image_companion_path(key)
+      info = Z_IMAGE_COMPANION_FILES[key]
+      return nil unless info
+      File.join(@models_dir, info[:filename])
+    end
+
+    def z_image_companions_present?
+      Z_IMAGE_COMPANION_FILES.all? { |key, _| File.exist?(z_image_companion_path(key)) }
+    end
+
+    def missing_z_image_companions
+      Z_IMAGE_COMPANION_FILES.select { |key, _| !File.exist?(z_image_companion_path(key)) }
+    end
+
+    def download_z_image_companions
+      missing = missing_z_image_companions
+      return [self, nil] if missing.empty?
+
+      hf_token = resolve_hf_token
+      unless hf_token
+        @hf_token_pending_action = :z_image_companions
+        return open_overlay(:hf_token)
+      end
+
+      @companion_downloading = true
+      @companion_remaining = missing.size
+      @companion_errors = []
+      @companion_current_file = ""
+      @companion_dest = nil
+
+      queue = missing.to_a
+      start_next_companion_download(queue, hf_token)
+    end
+
+    # Look for a TAESD decoder matching the given model's architecture.
+    # Returns nil if none present — caller falls back to --preview proj.
+    def taesd_path_for(path)
+      return nil unless path
+      arch = if flux_model?(path) || kontext_model?(path)
+        :flux
+      elsif detect_model_type(path) == "SDXL"
+        :sdxl
+      elsif flux2_model?(path) || wan_model?(path)
+        return nil  # sd.cpp TAESD doesn't cover these yet
+      else
+        :sd
+      end
+      globs = TAESD_FILES[arch] || []
+      globs.each do |g|
+        match = Dir.glob(File.join(@models_dir, g)).first
+        return match if match
+      end
+      nil
+    end
+
+    def flux2_model?(path)
+      return false unless path
+      basename = File.basename(path).downcase
+      basename.match?(/flux[-_]?2|klein/)
+    end
+
+    # FLUX.2 comes in 4B and 9B variants — each pairs with a different Qwen3 size
+    def flux2_variant(path)
+      basename = File.basename(path.to_s).downcase
+      basename.match?(/(?:^|[^0-9])4b(?:[^0-9]|$)/) ? :_4b : :_9b
+    end
+
+    def flux2_companions_for(path)
+      FLUX2_COMPANION_FILES[flux2_variant(path)] || {}
+    end
+
+    def flux2_companion_path(key, path = @selected_model_path)
+      info = flux2_companions_for(path)[key]
+      return nil unless info
+      File.join(@models_dir, info[:filename])
+    end
+
+    def flux2_companions_present?(path = @selected_model_path)
+      flux2_companions_for(path).all? { |key, _| File.exist?(flux2_companion_path(key, path)) }
+    end
+
+    def missing_flux2_companions(path = @selected_model_path)
+      flux2_companions_for(path).select { |key, _| !File.exist?(flux2_companion_path(key, path)) }
+    end
+
+    def download_flux2_companions
+      missing = missing_flux2_companions
+      return [self, nil] if missing.empty?
+
+      hf_token = resolve_hf_token
+      unless hf_token
+        @hf_token_pending_action = :flux2_companions
+        return open_overlay(:hf_token)
+      end
+
+      @companion_downloading = true
+      @companion_remaining = missing.size
+      @companion_errors = []
+      @companion_current_file = ""
+      @companion_dest = nil
+
+      queue = missing.to_a
+      start_next_companion_download(queue, hf_token)
     end
 
     def wan_model?(path)

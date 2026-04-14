@@ -307,6 +307,7 @@ class Chewy
         if @selected_model_path
           name = File.basename(@selected_model_path, File.extname(@selected_model_path))
           is_flux = flux_model?(@selected_model_path)
+          is_flux2 = flux2_model?(@selected_model_path)
           cached_type = @model_types[@selected_model_path]
 
           quant = name.match(/[_-](Q\d_\w+|F16|F32|q\d_\w+|f16|f32)/i)&.captures&.first&.upcase
@@ -316,6 +317,26 @@ class Chewy
             ok = wan_companions_present?
             pill_bg = ok ? Theme.SUCCESS : Theme.WARNING
             Lipgloss::Style.new.background(pill_bg).foreground(Theme.SURFACE).bold(true).render(" VIDEO ")
+          elsif is_flux2 || cached_type == "FLUX2"
+            ok = flux2_companions_present?
+            pill_bg = ok ? Theme.SUCCESS : Theme.WARNING
+            Lipgloss::Style.new.background(pill_bg).foreground(Theme.SURFACE).bold(true).render(" FLUX.2 ")
+          elsif z_image_model?(@selected_model_path) || cached_type == "Z-Image"
+            ok = z_image_companions_present?
+            pill_bg = ok ? Theme.SUCCESS : Theme.WARNING
+            Lipgloss::Style.new.background(pill_bg).foreground(Theme.SURFACE).bold(true).render(" Z-IMAGE ")
+          elsif qwen_image_model?(@selected_model_path) || cached_type == "Qwen-Image"
+            ok = qwen_image_companions_present?
+            pill_bg = ok ? Theme.SUCCESS : Theme.WARNING
+            Lipgloss::Style.new.background(pill_bg).foreground(Theme.SURFACE).bold(true).render(" QWEN ")
+          elsif kontext_model?(@selected_model_path)
+            ok = flux_companions_present?
+            pill_bg = ok ? Theme.SUCCESS : Theme.WARNING
+            Lipgloss::Style.new.background(pill_bg).foreground(Theme.SURFACE).bold(true).render(" KONTEXT ")
+          elsif chroma_model?(@selected_model_path) || cached_type == "Chroma"
+            ok = flux_companions_present?
+            pill_bg = ok ? Theme.SUCCESS : Theme.WARNING
+            Lipgloss::Style.new.background(pill_bg).foreground(Theme.SURFACE).bold(true).render(" CHROMA ")
           elsif is_flux || cached_type == "FLUX"
             ok = flux_companions_present?
             pill_bg = ok ? Theme.SUCCESS : Theme.WARNING
@@ -516,6 +537,11 @@ class Chewy
         status_lines << center.call(Lipgloss::Style.new.foreground(Theme.TEXT_DIM).render(batch_text))
       end
 
+      if @generation_queue && @generation_queue.length > 0
+        qtext = "#{@generation_queue.length} queued"
+        status_lines << center.call(Lipgloss::Style.new.foreground(Theme.ACCENT).render(qtext))
+      end
+
       if @gen_video_frame && @gen_video_frame_total && @gen_video_frame_total > 0
         video_text = "Frame #{@gen_video_frame}/#{@gen_video_frame_total}"
         status_lines << center.call(Lipgloss::Style.new.foreground(Theme.ACCENT).bold(true).render(video_text))
@@ -609,12 +635,20 @@ class Chewy
       width = [input.width, 1].max
       max_lines = [max_lines, 1].max
 
-      return input.view if value.empty? || value.chars.length <= width
+      if value.empty? || value.chars.length <= width
+        # Single-line fast path — record a no-wrap layout so click-to-cursor works
+        @input_layouts ||= {}
+        @input_layouts[input.object_id] = { width: width, start_line: 0, wrapped: false }
+        return input.view
+      end
 
       lines, positions = wrapped_input_layout(value, width)
       cursor_line, cursor_col = positions[input.position]
       start_line = [cursor_line - max_lines + 1, 0].max
       visible_lines = lines[start_line, max_lines] || []
+
+      @input_layouts ||= {}
+      @input_layouts[input.object_id] = { width: width, start_line: start_line, wrapped: true }
 
       visible_lines.map.with_index do |line, offset|
         line_index = start_line + offset

@@ -71,8 +71,58 @@ class Chewy
       when :mask_painter then handle_mask_painter_key(message)
       when :starter_pack then handle_starter_pack_key(message)
       when :video_player then handle_video_player_key(message)
+      when :prompt_search then handle_prompt_search_key(message)
       else [self, nil]
       end
+    end
+
+    def open_prompt_search
+      @prompt_search_input.value = ""
+      @prompt_search_input.focus
+      @prompt_search_matches = @prompt_history.reverse
+      @prompt_search_index = 0
+      @overlay = :prompt_search
+      [self, nil]
+    end
+
+    def fuzzy_match_prompts(query)
+      return @prompt_history.reverse if query.empty?
+      q = query.downcase
+      scored = @prompt_history.filter_map do |p|
+        next nil unless p.downcase.include?(q) || q.chars.all? { |c| p.downcase.include?(c) }
+        score = p.downcase.include?(q) ? 1000 - p.length : 100 - p.length
+        [score, p]
+      end
+      scored.sort_by { |s, _| -s }.map { |_, p| p }
+    end
+
+    def handle_prompt_search_key(message)
+      key = message.to_s
+      case key
+      when "esc", "ctrl+g"
+        @prompt_search_input.blur
+        return close_overlay
+      when "enter"
+        chosen = @prompt_search_matches[@prompt_search_index]
+        if chosen
+          @prompt_input.value = chosen
+          @history_index = -1
+        end
+        @prompt_search_input.blur
+        return close_overlay
+      when "up", "ctrl+p"
+        @prompt_search_index = [@prompt_search_index - 1, 0].max
+        return [self, nil]
+      when "down", "ctrl+n"
+        @prompt_search_index = [@prompt_search_index + 1, [@prompt_search_matches.length - 1, 0].max].min
+        return [self, nil]
+      when "ctrl+v"
+        return paste_text_into(@prompt_search_input)
+      end
+      @prompt_search_input, cmd = @prompt_search_input.update(message)
+      @prompt_search_matches = fuzzy_match_prompts(@prompt_search_input.value.strip)
+      @prompt_search_index = 0
+      [self, cmd]
     end
 
     def handle_models_panel_key(message)
@@ -355,6 +405,9 @@ class Chewy
         meta = gallery_meta(entry)
         load_from_history(meta) if meta && !meta.empty?
         return close_overlay
+      when "u"
+        entry = @gallery_images[@gallery_index]
+        return start_upscale(entry[:path]) if entry
       end
       [self, nav_cmd]
     end
@@ -944,6 +997,9 @@ class Chewy
         end
         # Resume the action that triggered the token prompt
         return download_flux_companions if pending == :flux_companions
+        return download_flux2_companions if pending == :flux2_companions
+        return download_z_image_companions if pending == :z_image_companions
+        return download_qwen_image_companions if pending == :qwen_image_companions
         return download_wan_companions if pending == :wan_companions
         return [self, toast]
       end

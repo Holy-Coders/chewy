@@ -116,10 +116,12 @@ class Chewy
           call_local_llm(llm[:base_url], ENHANCE_SYSTEM, user_msg)
         when :openai
           user_msg = is_flux ? "Enhance for FLUX model: #{text}" : "Enhance for Stable Diffusion: #{text}"
-          call_openai_chat(llm[:api_key], ENHANCE_SYSTEM, user_msg)
+          r = call_openai_chat(llm[:api_key], ENHANCE_SYSTEM, user_msg)
+          detect_refusal!(r, "OpenAI"); r
         when :gemini
           user_msg = is_flux ? "Enhance for FLUX model: #{text}" : "Enhance for Stable Diffusion: #{text}"
-          call_gemini_chat(llm[:api_key], ENHANCE_SYSTEM, user_msg)
+          r = call_gemini_chat(llm[:api_key], ENHANCE_SYSTEM, user_msg)
+          detect_refusal!(r, "Gemini"); r
         else
           enhance_prompt_local(text, is_flux)
         end
@@ -144,9 +146,11 @@ class Chewy
         when :local_llm
           call_local_llm(llm[:base_url], NEGATIVE_SYSTEM, text)
         when :openai
-          call_openai_chat(llm[:api_key], NEGATIVE_SYSTEM, text)
+          r = call_openai_chat(llm[:api_key], NEGATIVE_SYSTEM, text)
+          detect_refusal!(r, "OpenAI"); r
         when :gemini
-          call_gemini_chat(llm[:api_key], NEGATIVE_SYSTEM, text)
+          r = call_gemini_chat(llm[:api_key], NEGATIVE_SYSTEM, text)
+          detect_refusal!(r, "Gemini"); r
         else
           LOCAL_NEGATIVE
         end
@@ -306,6 +310,14 @@ class Chewy
         system_instruction: { parts: [{ text: system_prompt }] },
         contents: [{ parts: [{ text: user_prompt }] }],
         generationConfig: { maxOutputTokens: 500, temperature: 0.8 },
+        # Disable Gemini's default safety filters so NSFW prompts aren't blocked.
+        # OpenAI has no equivalent knob — NSFW must be done via local LLM or Gemini.
+        safetySettings: [
+          { category: "HARM_CATEGORY_HARASSMENT",        threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_HATE_SPEECH",       threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+        ],
       }
 
       req = Net::HTTP::Post.new(uri)
@@ -316,6 +328,15 @@ class Chewy
       raise "Gemini: #{JSON.parse(resp.body).dig('error', 'message') || resp.code}" unless resp.is_a?(Net::HTTPSuccess)
 
       data = JSON.parse(resp.body)
+      # Gemini may return a successful HTTP response but block the content —
+      # surface that as a clear refusal rather than a generic "Empty response".
+      if (block = data.dig("promptFeedback", "blockReason"))
+        raise "Gemini blocked the prompt (#{block}) — switch to a local LLM (ollama) to bypass hosted filters."
+      end
+      finish = data.dig("candidates", 0, "finishReason")
+      if finish && %w[SAFETY PROHIBITED_CONTENT BLOCKLIST].include?(finish)
+        raise "Gemini refused the prompt (#{finish}) — switch to a local LLM (ollama) to bypass hosted filters."
+      end
       data.dig("candidates", 0, "content", "parts", 0, "text")&.strip || raise("Empty response")
     end
 
@@ -335,6 +356,24 @@ class Chewy
       text = text.sub(/\A(Here('s| is) (the |your )?(enhanced |improved |negative )?prompt:?\s*)/i, '')
       text = text.sub(/\A(Prompt:?\s*)/i, '')
       text.strip
+    end
+
+    # Hosted LLMs (OpenAI, Gemini) refuse NSFW prompts with refusal prose rather
+    # than an API error. If the "enhanced" text looks like a refusal, raise so
+    # we show an error toast instead of pasting the refusal into the prompt box.
+    REFUSAL_PATTERNS = [
+      /\AI (can't|cannot|won't|will not|am unable|am not able) /i,
+      /\AI'm (sorry|unable|not able|afraid) /i,
+      /\A(Sorry|Unfortunately),?\s+I /i,
+      /\b(violat|against|comply with).{0,30}(policy|policies|guideline|content)\b/i,
+      /\b(cannot|can't)\s+(generate|create|help|assist|produce|write).{0,40}(explicit|sexual|nsfw|adult|inappropriate)\b/i,
+    ].freeze
+
+    def detect_refusal!(text, provider_label)
+      return unless text
+      snippet = text.strip[0, 400]
+      return unless REFUSAL_PATTERNS.any? { |re| snippet =~ re }
+      raise "#{provider_label} refused the prompt (content policy). Set up a local LLM — e.g. ollama — to bypass hosted filters."
     end
   end
 end

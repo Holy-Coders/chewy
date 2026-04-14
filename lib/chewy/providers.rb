@@ -25,6 +25,11 @@ module Provider
     :width, :height, :seed, :sampler, :scheduler, :batch,
     :init_image, :strength, :threads, :loras, :output_dir,
     :is_flux, :flux_clip_l, :flux_t5xxl, :flux_vae, :guidance,
+    :is_flux2, :flux2_llm, :flux2_vae,
+    :is_kontext, :ref_image, :taesd_path,
+    :is_chroma, :chroma_t5xxl, :chroma_vae,
+    :is_z_image, :z_image_llm, :z_image_vae,
+    :is_qwen_image, :qwen_image_llm, :qwen_image_vae,
     :controlnet_model, :controlnet_image, :controlnet_strength, :controlnet_canny,
     :mask_image,
     :video_mode, :video_frames, :fps, :flow_shift,
@@ -242,6 +247,51 @@ class LocalSdCppProvider < Provider::Base
         wan_args += ["--clip_vision", request.wan_clip_vision]
       end
       wan_args
+    elsif request.is_qwen_image
+      [@sd_bin, "--diffusion-model", request.model,
+       "--llm", request.qwen_image_llm, "--vae", request.qwen_image_vae,
+       "-p", request.prompt,
+       "--steps", request.steps.to_s, "--cfg-scale", request.cfg_scale.to_s,
+       "-W", request.width.to_s, "-H", request.height.to_s,
+       "--seed", request.seed.to_s, "--sampling-method", request.sampler,
+       "--scheduler", request.scheduler,
+       "-t", request.threads.to_s, "--diffusion-fa", "--vae-tiling", "--offload-to-cpu",
+       "-b", request.batch.to_s,
+       "-o", output_path]
+    elsif request.is_z_image
+      [@sd_bin, "--diffusion-model", request.model,
+       "--llm", request.z_image_llm, "--vae", request.z_image_vae,
+       "-p", request.prompt,
+       "--steps", request.steps.to_s, "--cfg-scale", request.cfg_scale.to_s,
+       "-W", request.width.to_s, "-H", request.height.to_s,
+       "--seed", request.seed.to_s, "--sampling-method", request.sampler,
+       "--scheduler", request.scheduler,
+       "-t", request.threads.to_s, "--diffusion-fa", "--vae-tiling", "--offload-to-cpu",
+       "-b", request.batch.to_s,
+       "-o", output_path]
+    elsif request.is_chroma
+      [@sd_bin, "--diffusion-model", request.model,
+       "--t5xxl", request.chroma_t5xxl, "--vae", request.chroma_vae,
+       "-p", request.prompt,
+       "--steps", request.steps.to_s, "--cfg-scale", request.cfg_scale.to_s,
+       "-W", request.width.to_s, "-H", request.height.to_s,
+       "--seed", request.seed.to_s, "--sampling-method", request.sampler,
+       "--scheduler", request.scheduler,
+       "-t", request.threads.to_s, "--fa", "--vae-tiling", "--clip-on-cpu",
+       "--chroma-disable-dit-mask",
+       "-b", request.batch.to_s,
+       "-o", output_path]
+    elsif request.is_flux2
+      [@sd_bin, "--diffusion-model", request.model,
+       "--llm", request.flux2_llm, "--vae", request.flux2_vae,
+       "-p", request.prompt,
+       "--steps", request.steps.to_s, "--cfg-scale", request.cfg_scale.to_s,
+       "-W", request.width.to_s, "-H", request.height.to_s,
+       "--seed", request.seed.to_s, "--sampling-method", request.sampler,
+       "--scheduler", request.scheduler,
+       "-t", request.threads.to_s, "--diffusion-fa", "--vae-tiling", "--offload-to-cpu",
+       "-b", request.batch.to_s,
+       "-o", output_path]
     elsif request.is_flux
       [@sd_bin, "--diffusion-model", request.model,
        "--clip_l", request.flux_clip_l, "--t5xxl", request.flux_t5xxl, "--vae", request.flux_vae,
@@ -267,12 +317,19 @@ class LocalSdCppProvider < Provider::Base
        "-o", output_path]
     end
     unless request.is_wan
-      args += ["--preview", "proj", "--preview-path", preview_path, "--preview-interval", "1"]
+      if request.taesd_path
+        args += ["--preview", "tae", "--taesd", request.taesd_path,
+                 "--preview-path", preview_path, "--preview-interval", "1"]
+      else
+        args += ["--preview", "proj", "--preview-path", preview_path, "--preview-interval", "1"]
+      end
     end
     args += ["--negative-prompt", request.negative_prompt] unless request.negative_prompt.empty?
     args += ["--flow-shift", request.flow_shift.to_s] if request.is_wan && request.flow_shift
-    args += ["--lora-model-dir", @lora_dir] if request.loras&.any? && !request.is_flux && !request.is_wan
-    if request.init_image
+    args += ["--lora-model-dir", @lora_dir] if request.loras&.any? && !request.is_flux && !request.is_flux2 && !request.is_z_image && !request.is_qwen_image && !request.is_wan
+    if request.is_kontext && request.ref_image
+      args += ["-r", request.ref_image]
+    elsif request.init_image && !request.is_flux2 && !request.is_z_image && !request.is_qwen_image
       args += ["--init-img", request.init_image]
       args += ["--strength", request.strength.to_s] unless request.is_wan
     end

@@ -26,12 +26,17 @@ class Chewy
           stat = File.stat(path)
           ext = File.extname(path).delete(".").upcase
           is_flux = flux_model?(path)
+          is_flux2 = flux2_model?(path)
 
           is_wan = wan_model?(path)
           type_tag = if is_wan
             ok = wan_companions_present?
             s = Lipgloss::Style.new.foreground(ok ? Theme.SUCCESS : Theme.WARNING).bold(true)
             s.render(ok ? "Wan VIDEO" : "Wan (needs companions)")
+          elsif is_flux2
+            ok = flux2_companions_present?(path)
+            s = Lipgloss::Style.new.foreground(ok ? Theme.SUCCESS : Theme.WARNING).bold(true)
+            s.render(ok ? "FLUX.2" : "FLUX.2 (needs companions)")
           elsif is_flux
             ok = flux_companions_present?
             s = Lipgloss::Style.new.foreground(ok ? Theme.SUCCESS : Theme.WARNING).bold(true)
@@ -43,6 +48,9 @@ class Chewy
           pin = @pinned_models.include?(path) ? accent.render(" [pinned]") : ""
           meta = "\n#{accent.render(format_bytes(stat.size))} #{dim.render("|")} #{dim.render(ext)} #{dim.render("|")} #{type_tag}#{pin}"
           meta += "\n#{dim.render(path)}"
+          if (src = @model_sources[path])
+            meta += "\n#{dim.render("from huggingface.co/")}#{accent.render(src)}"
+          end
         end
       end
 
@@ -486,7 +494,7 @@ class Chewy
         Lipgloss.join_vertical(:left, title_bar, body)
       )
 
-      status_text = "enter: fullscreen | p: load params | ^e: open external | del: delete | j/k: navigate | esc: close"
+      status_text = "enter: fullscreen | p: load params | u: upscale | ^e: open | del: delete | j/k: navigate | esc: close"
       key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
       desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
       status = Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE)
@@ -752,11 +760,14 @@ class Chewy
         ["^x", "Cancel generation"],
         ["^w", "Clear prompt & image (new start)"],
         ["^r", "Randomize seed"],
+        ["alt+q", "Queue current generation"],
+        ["alt+s", "Seed sweep (4 random seeds)"],
       ]],
       ["Navigation", [
         ["tab", "Cycle focus (prompt / negative / params)"],
         ["shift+tab", "Cycle focus backwards"],
         ["up/down", "Prompt history (in prompt field)"],
+        ["alt+h", "Search prompt history"],
         ["j/k", "Navigate params (in params)"],
         ["h/l", "Adjust param value (in params)"],
       ]],
@@ -775,6 +786,13 @@ class Chewy
         ["^u", "Clear init image + mask"],
         ["^e", "Open last image in viewer"],
         ["^f", "Fullscreen image preview"],
+        ["click", "Move cursor (in prompt / negative)"],
+      ]],
+      ["Gallery", [
+        ["enter / space", "Fullscreen preview"],
+        ["p", "Load prompt + settings from image"],
+        ["u", "Upscale image (Real-ESRGAN 4x)"],
+        ["delete / backspace", "Delete image"],
       ]],
       ["Mask (on mask param)", [
         ["g", "Auto-generate center-preserve mask"],
@@ -970,6 +988,42 @@ class Chewy
 
     def render_hf_token_status
       "enter: save | esc: cancel"
+    end
+
+    def render_prompt_search_content
+      dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+      accent = Lipgloss::Style.new.foreground(Theme.ACCENT)
+      sel = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+      muted = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+
+      lines = []
+      lines << accent.render("search: ") + @prompt_search_input.view
+      lines << dim.render("─" * [@width - 6, 20].max)
+
+      if @prompt_search_matches.empty?
+        lines << muted.render(@prompt_history.empty? ? "(no history yet — generate something first)" : "(no matches)")
+      else
+        visible = [@height - 12, 5].max
+        start = [@prompt_search_index - visible / 2, 0].max
+        start = [start, [@prompt_search_matches.length - visible, 0].max].min
+        range = start...[start + visible, @prompt_search_matches.length].min
+        range.each do |i|
+          prompt = @prompt_search_matches[i]
+          one_line = prompt.gsub(/\s+/, " ")
+          max_w = [@width - 8, 20].max
+          truncated = one_line.length > max_w ? one_line[0, max_w - 1] + "…" : one_line
+          if i == @prompt_search_index
+            lines << sel.render("▸ #{truncated}")
+          else
+            lines << "  " + Lipgloss::Style.new.foreground(Theme.TEXT).render(truncated)
+          end
+        end
+      end
+      lines.join("\n")
+    end
+
+    def render_prompt_search_status
+      "#{@prompt_search_matches.length} match#{@prompt_search_matches.length == 1 ? "" : "es"} | enter: use | ↑↓: navigate | esc: cancel"
     end
 
     def render_file_picker_view

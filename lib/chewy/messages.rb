@@ -151,3 +151,13 @@ class VideoFrameTickMessage < Bubbletea::Message
   attr_reader :generation
   def initialize(generation:) @generation = generation end
 end
+
+class UpscaleDoneMessage < Bubbletea::Message
+  attr_reader :output_path, :elapsed
+  def initialize(output_path:, elapsed:) @output_path = output_path; @elapsed = elapsed end
+end
+
+class UpscaleErrorMessage < Bubbletea::Message
+  attr_reader :error
+  def initialize(error:) @error = error end
+end

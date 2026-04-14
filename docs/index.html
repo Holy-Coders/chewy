@@ -715,7 +715,7 @@
   <!-- Hero -->
   <section class="hero">
     <div class="container">
-      <div class="hero-badge" id="version-badge">v0.11.0 &mdash; Video generation (Wan 2.1), security hardening, gallery improvements</div>
+      <div class="hero-badge" id="version-badge">v0.12.0 &mdash; Real-ESRGAN upscaling, Chroma + FLUX.2 + Z-Image + Qwen-Image, generation queue, prompt search</div>
       <h1>AI image &amp; video generation<br><span class="gradient">in your terminal.</span></h1>
       <p>Chewy is a beautiful TUI for generating images and videos with Stable Diffusion, FLUX, Wan, DALL-E, Imagen, and more. Run locally or connect to cloud providers &mdash; your choice.</p>
       <div class="hero-actions">
@@ -881,6 +881,9 @@
         <div class="key-item"><kbd>^f</kbd> <span>Fullscreen preview</span></div>
         <div class="key-item"><kbd>^x</kbd> <span>Cancel generation</span></div>
         <div class="key-item"><kbd>^r</kbd> <span>Randomize seed</span></div>
+        <div class="key-item"><kbd>alt+h</kbd> <span>Search prompt history</span></div>
+        <div class="key-item"><kbd>alt+q</kbd> <span>Queue generation</span></div>
+        <div class="key-item"><kbd>alt+s</kbd> <span>Seed sweep (4 seeds)</span></div>
         <div class="key-item"><kbd>^u</kbd> <span>Clear init image</span></div>
         <div class="key-item"><kbd>^w</kbd> <span>Clear &amp; start fresh</span></div>
         <div class="key-item"><kbd>F1</kbd> <span>Help overlay</span></div>
@@ -990,7 +993,7 @@
         if (data.tag_name) {
           var version = data.tag_name.replace(/^v/, '');
           var badge = document.getElementById('version-badge');
-          badge.textContent = 'v' + version + ' \u2014 Video generation (Wan 2.1), security hardening, gallery improvements';
+          badge.textContent = 'v' + version + ' \u2014 Real-ESRGAN upscaling, Chroma + FLUX.2 + Z-Image + Qwen-Image, generation queue, prompt search';
         }
       })
       .catch(function() {});

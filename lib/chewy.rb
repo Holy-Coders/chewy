@@ -32,6 +32,7 @@ require_relative "chewy/overlay_rendering"
 require_relative "chewy/image_rendering"
 require_relative "chewy/prompt_enhance"
 require_relative "chewy/video"
+require_relative "chewy/upscale"
 require_relative "chewy/cli"
 
 class Chewy
@@ -48,6 +49,7 @@ class Chewy
   include ImageRendering
   include PromptEnhance
   include Video
+  include Upscale
 
   def initialize
     @config = load_config
@@ -74,6 +76,8 @@ class Chewy
     @recent_models = @config["recent_models"] || []
     @incompatible_models = @config["incompatible_models"] || []
     @model_types = @config["model_types"] || {}  # path => "SD 1.x", "SDXL", "Flux", etc.
+    @model_sources = @config["model_sources"] || {}  # path => "huggingface_user/repo"
+    @generation_queue = []                            # FIFO of queued generation snapshots
 
     # Prompt + Negative
     @prompt_input = Bubbles::TextInput.new
@@ -93,6 +97,15 @@ class Chewy
     @prompt_history = load_prompt_history_from_disk
     @history_index = -1
     @saved_prompt = ""
+
+    # Prompt fuzzy-search overlay
+    @prompt_search_input = Bubbles::TextInput.new
+    @prompt_search_input.placeholder = "Type to filter prompts..."
+    @prompt_search_input.prompt = ""
+    @prompt_search_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
+    @prompt_search_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
+    @prompt_search_matches = []
+    @prompt_search_index = 0
 
     # Params
     ds = @config["default_steps"] || 20
@@ -358,13 +371,26 @@ class Chewy
       @error_message = nil
       output_msg = "output: #{File.basename(message.output_path)} \u2502 #{message.elapsed}s"
       output_msg += " \u2502 seed #{@last_seed}" if @last_seed
-      [self, set_status_toast(output_msg)]
+      # Auto-start next queued generation if any
+      _self, next_cmd = dequeue_next_generation
+      if next_cmd
+        [self, next_cmd]
+      else
+        [self, set_status_toast(output_msg)]
+      end
     when RevealTickMessage
       handle_reveal_tick(message)
     when GenerationErrorMessage
       @generating = false; @gen_pid = nil; @gen_start_time = nil
       @status_message = nil
-      [self, set_error_toast(message.error)]
+      # Drop the rest of the queue on error — user should see the failure and retry manually
+      if @generation_queue.any?
+        dropped = @generation_queue.length
+        @generation_queue.clear
+        [self, set_error_toast("#{message.error} (cleared #{dropped} queued)")]
+      else
+        [self, set_error_toast(message.error)]
+      end
     when ReposFetchedMessage
       handle_repos_fetched(message)
     when ReposFetchErrorMessage
@@ -415,6 +441,10 @@ class Chewy
       handle_video_done(message)
     when VideoFrameTickMessage
       handle_video_frame_tick(message)
+    when UpscaleDoneMessage
+      handle_upscale_done(message)
+    when UpscaleErrorMessage
+      handle_upscale_error(message)
     when PromptEnhanceMessage
       handle_prompt_enhance_result(message)
     when ClipboardPasteMessage
@@ -503,6 +533,7 @@ class Chewy
       when :provider then render_overlay_panel("Provider", render_provider_content, render_provider_status)
       when :api_key then render_overlay_panel("API Key", render_api_key_content, render_api_key_status)
       when :video_player then render_video_player_view
+      when :prompt_search then render_overlay_panel("Prompt History", render_prompt_search_content, render_prompt_search_status)
       else render_main_view
       end
     end

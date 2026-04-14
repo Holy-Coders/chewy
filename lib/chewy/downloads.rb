@@ -59,13 +59,10 @@ class Chewy
     end
 
     def fetch_civitai_models_cmd(query, type: "Checkpoint")
-      Proc.new do
-        params = "sort=Most+Downloaded&limit=50"
-        params += "&types=#{type}" if query.empty?  # types filter only works without query
-        params += "&query=#{URI.encode_www_form_component(query)}" unless query.empty?
+      fetch_fn = lambda do |params|
         uri = URI.parse("#{CIVITAI_API_BASE}/models?#{params}")
         data = JSON.parse(hf_get(uri).body)
-        models = (data["items"] || []).map do |m|
+        (data["items"] || []).map do |m|
           latest = m["modelVersions"]&.first
           files = (latest&.dig("files") || []).select { |f|
             name = f["name"].downcase
@@ -79,8 +76,33 @@ class Chewy
             base_model: latest&.dig("baseModel"),
             files: files.map { |f| { name: f["name"], size: f["sizeKB"]&.*(1024)&.to_i, url: f["downloadUrl"] } },
           }
-        end.select { |m| m[:files].any? && m[:type]&.upcase == type.upcase }.first(25)
-        ReposFetchedMessage.new(repos: models)
+        end
+      end
+
+      Proc.new do
+        base = "sort=Most+Downloaded&limit=50"
+        models = []
+        if query.empty?
+          # No query — filter to type server-side, sorted by popularity
+          raw = fetch_fn.call("#{base}&types=#{type}")
+          models = raw.select { |m| m[:files].any? && m[:type]&.upcase == type.upcase }
+        else
+          encoded = URI.encode_www_form_component(query)
+          # CivitAI: `types` + `query` don't combine, but `types` + `tag` do.
+          # Try tag-based first (most targeted for "flux", "sdxl", "wan", etc.)
+          tag_results = fetch_fn.call("#{base}&types=#{type}&tag=#{encoded}")
+          models = tag_results.select { |m| m[:files].any? && m[:type]&.upcase == type.upcase }
+          if models.empty?
+            # Fallback: plain text query. Filter checkpoints client-side when possible,
+            # but if the whole result set is non-checkpoint, surface everything so the
+            # user isn't staring at an empty list.
+            raw = fetch_fn.call("#{base}&query=#{encoded}")
+            with_files = raw.select { |m| m[:files].any? }
+            ckpts = with_files.select { |m| m[:type]&.upcase == type.upcase }
+            models = ckpts.any? ? ckpts : with_files
+          end
+        end
+        ReposFetchedMessage.new(repos: models.first(25))
       rescue => e
         ReposFetchErrorMessage.new(error: e.message)
       end
@@ -206,12 +228,14 @@ class Chewy
       @model_downloading = true; @download_dest = part
       @download_total = size || 0; @download_filename = filename; @error_message = nil
       url = "#{HF_DOWNLOAD_BASE}/#{repo_id}/resolve/main/#{URI.encode_www_form_component(filename)}"
+      captured_repo = repo_id
       Proc.new do
         _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",
           "-C", "-", "--retry", "5", "--retry-delay", "3", "--retry-all-errors",
           "--connect-timeout", "30", url)
         if st.success?
           File.rename(part, dest)
+          @model_sources[dest] = captured_repo
           ModelDownloadDoneMessage.new(path: dest, filename: filename)
         else
           # Keep .part file so resume works on next attempt
@@ -229,6 +253,7 @@ class Chewy
     def handle_download_done(message)
       @model_downloading = false; @download_dest = nil; @download_filename = ""
       @error_message = nil
+      save_config if @model_sources && !@model_sources.empty?
       scan_models
       if @overlay == :cn_download
         return exit_cn_download

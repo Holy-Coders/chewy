@@ -18,11 +18,25 @@ class Chewy
         if name.include?("schnell")
           return [self, set_error_toast("Schnell models are poor at img2img — use FLUX Dev, SD 1.5, or SDXL instead")]
         end
+        if flux2_model?(@selected_model_path)
+          return [self, set_error_toast("FLUX.2 Klein is text-to-image only in chewy — remove the init image")]
+        end
+        if z_image_model?(@selected_model_path)
+          return [self, set_error_toast("Z-Image is text-to-image only in chewy — remove the init image")]
+        end
+        if qwen_image_model?(@selected_model_path)
+          return [self, set_error_toast("Qwen-Image is text-to-image only in chewy — remove the init image")]
+        end
+      end
+
+      # Kontext requires a reference image
+      if @provider.provider_type == :local && @selected_model_path && kontext_model?(@selected_model_path) && !@init_image_path
+        return [self, set_error_toast("FLUX.1 Kontext requires a reference image — press ^b to select one")]
       end
 
       # ControlNet is not supported with FLUX or Wan models
       if @controlnet_model_path && @provider.provider_type == :local && @selected_model_path
-        if flux_model?(@selected_model_path)
+        if flux_model?(@selected_model_path) || flux2_model?(@selected_model_path)
           return [self, set_error_toast("ControlNet is not supported with FLUX models — use SD 1.5, SD 2.x, or SDXL")]
         end
         if wan_model?(@selected_model_path)
@@ -70,8 +84,17 @@ class Chewy
         unless @selected_model_path
           return [self, set_error_toast("No model selected")]
         end
-        if flux_model?(@selected_model_path) && !flux_companions_present?
+        if (flux_model?(@selected_model_path) || chroma_model?(@selected_model_path)) && !flux_companions_present?
           return download_flux_companions
+        end
+        if flux2_model?(@selected_model_path) && !flux2_companions_present?
+          return download_flux2_companions
+        end
+        if z_image_model?(@selected_model_path) && !z_image_companions_present?
+          return download_z_image_companions
+        end
+        if qwen_image_model?(@selected_model_path) && !qwen_image_companions_present?
+          return download_qwen_image_companions
         end
         if wan_model?(@selected_model_path) && !wan_companions_present?
           return download_wan_companions
@@ -117,6 +140,11 @@ class Chewy
         @remote_model_id || @provider.list_models.first&.dig(:id)
       end
       is_flux = @provider.provider_type == :local && @selected_model_path && flux_model?(@selected_model_path)
+      is_flux2 = @provider.provider_type == :local && @selected_model_path && flux2_model?(@selected_model_path)
+      is_kontext = @provider.provider_type == :local && @selected_model_path && kontext_model?(@selected_model_path)
+      is_chroma = @provider.provider_type == :local && @selected_model_path && chroma_model?(@selected_model_path)
+      is_z_image = @provider.provider_type == :local && @selected_model_path && z_image_model?(@selected_model_path)
+      is_qwen_image = @provider.provider_type == :local && @selected_model_path && qwen_image_model?(@selected_model_path)
       is_wan = @provider.provider_type == :local && @selected_model_path && wan_model?(@selected_model_path)
 
       if is_wan
@@ -136,6 +164,21 @@ class Chewy
         flux_clip_l: is_flux ? flux_companion_path("clip_l") : nil,
         flux_t5xxl: is_flux ? flux_companion_path("t5xxl") : nil,
         flux_vae: is_flux ? flux_companion_path("vae") : nil,
+        is_flux2: is_flux2,
+        flux2_llm: is_flux2 ? flux2_companion_path("llm") : nil,
+        flux2_vae: is_flux2 ? flux2_companion_path("vae") : nil,
+        is_kontext: is_kontext,
+        ref_image: is_kontext ? @init_image_path : nil,
+        is_chroma: is_chroma,
+        chroma_t5xxl: is_chroma ? flux_companion_path("t5xxl") : nil,
+        chroma_vae: is_chroma ? flux_companion_path("vae") : nil,
+        is_z_image: is_z_image,
+        z_image_llm: is_z_image ? z_image_companion_path("llm") : nil,
+        z_image_vae: is_z_image ? z_image_companion_path("vae") : nil,
+        is_qwen_image: is_qwen_image,
+        qwen_image_llm: is_qwen_image ? qwen_image_companion_path("llm") : nil,
+        qwen_image_vae: is_qwen_image ? qwen_image_companion_path("vae") : nil,
+        taesd_path: @provider.provider_type == :local && @selected_model_path ? taesd_path_for(@selected_model_path) : nil,
         controlnet_model: is_wan ? nil : @controlnet_model_path,
         controlnet_image: is_wan ? nil : @controlnet_image_path,
         controlnet_strength: @controlnet_strength,
@@ -158,7 +201,7 @@ class Chewy
         "provider" => @provider.id, "provider_name" => @provider.display_name,
       }
       if @provider.provider_type == :local
-        sidecar_base["model_type"] = is_wan ? "wan" : (is_flux ? "flux" : "sd")
+        sidecar_base["model_type"] = is_wan ? "wan" : (is_flux2 ? "flux2" : (is_flux ? "flux" : "sd"))
       end
       if is_wan
         sidecar_base["type"] = "video"
@@ -301,6 +344,76 @@ class Chewy
         p unless p.nil? || p.empty?
       end
       prompts.uniq.last(100)
+    end
+
+    # ---------- Generation queue ----------
+
+    # Snapshot the current prompt/params and append to the queue.
+    # When the active generation finishes, dequeue_next_generation picks it up.
+    def enqueue_current
+      prompt = @prompt_input.value.strip
+      return [self, set_error_toast("Prompt cannot be empty")] if prompt.empty?
+      snapshot = {
+        prompt: prompt,
+        negative: @negative_input.value,
+        params: @params.dup,
+        sampler: @sampler,
+        scheduler: @scheduler,
+        model: @selected_model_path,
+        init_image: @init_image_path,
+        mask_image: @mask_image_path,
+        loras: @selected_loras.dup,
+      }
+      @generation_queue << snapshot
+      [self, set_status_toast("Queued (#{@generation_queue.length} waiting)")]
+    end
+
+    def dequeue_next_generation
+      return [self, nil] if @generation_queue.empty?
+      snap = @generation_queue.shift
+      @prompt_input.value = snap[:prompt]
+      @negative_input.value = snap[:negative] || ""
+      @params = snap[:params] if snap[:params]
+      @sampler = snap[:sampler] if snap[:sampler]
+      @scheduler = snap[:scheduler] if snap[:scheduler]
+      @selected_model_path = snap[:model] if snap[:model]
+      @init_image_path = snap[:init_image]
+      @mask_image_path = snap[:mask_image]
+      @selected_loras = snap[:loras] || []
+      start_generation
+    end
+
+    def clear_generation_queue
+      count = @generation_queue.length
+      @generation_queue.clear
+      [self, set_status_toast("Cleared #{count} queued generation#{count == 1 ? "" : "s"}")]
+    end
+
+    # Seed sweep — enqueue N variants of the current prompt with random seeds.
+    # Builds on the generation queue so results stream into the gallery as each finishes.
+    def seed_sweep(n = 4)
+      prompt = @prompt_input.value.strip
+      return [self, set_error_toast("Prompt cannot be empty")] if prompt.empty?
+      seeds = Array.new(n) { rand(0..2**31 - 1) }
+      # First seed becomes the active generation; the rest go in the queue
+      @params[:seed] = seeds.first
+      seeds.drop(1).each do |s|
+        params = @params.dup
+        params[:seed] = s
+        @generation_queue << {
+          prompt: prompt,
+          negative: @negative_input.value,
+          params: params,
+          sampler: @sampler,
+          scheduler: @scheduler,
+          model: @selected_model_path,
+          init_image: @init_image_path,
+          mask_image: @mask_image_path,
+          loras: @selected_loras.dup,
+        }
+      end
+      _self, cmd = start_generation
+      [self, cmd || set_status_toast("Sweep: #{n} seeds queued")]
     end
 
     def add_to_prompt_history(text)

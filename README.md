@@ -85,11 +85,16 @@ API keys are entered in-app (stored securely with chmod 600) or via environment 
 | `^x` | Cancel generation |
 | `^w` | Clear prompt and image (start fresh) |
 | `^r` | Randomize seed |
+| `alt+h` | Search prompt history |
+| `alt+q` | Queue current generation |
+| `alt+s` | Seed sweep (4 random seeds) |
 | `alt+e` | AI enhance prompt |
 | `alt+n` | AI generate negative prompt |
 | `alt+r` | AI random creative prompt |
 | `F1` | Help overlay (all shortcuts) |
 | `^q` | Quit |
+
+In the gallery: `u` upscales the selected image (Real-ESRGAN 4x), `p` loads its prompt and settings.
 
 ### Models
 
@@ -104,6 +109,21 @@ Press `^d` inside chewy to browse recommended starter models or search HuggingFa
 ### FLUX models
 
 FLUX models require companion files (clip_l, t5xxl, vae). Chewy will automatically download these when you first try to generate with a FLUX model. You'll need a [HuggingFace token](https://huggingface.co/settings/tokens) with read access.
+
+Chewy also detects and runs **Chroma** (uncensored Apache-2.0 FLUX derivative), **FLUX.1 Kontext** (reference-image edits), **FLUX.2 Klein/Dev**, **Z-Image**, and **Qwen-Image** — companion files are downloaded automatically per model family.
+
+### Upscaling
+
+In the gallery, press `u` on any image to upscale it 4x with Real-ESRGAN. The upscaler model is downloaded automatically on first use. Output is saved alongside the original.
+
+### Generation Queue & Seed Sweep
+
+- `alt+q` — queue the current prompt for generation. When the current one finishes, the next is launched automatically. Keep stacking prompts while one is running.
+- `alt+s` — seed sweep: generate 4 variants of the current prompt with random seeds, queued back-to-back.
+
+### Prompt Search
+
+Press `alt+h` in the prompt field to open a fuzzy-searchable view of your prompt history. Type to filter, up/down to select, enter to load.
 
 ### Video Generation (Experimental)
 

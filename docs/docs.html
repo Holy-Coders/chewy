@@ -255,6 +255,9 @@
       <a href="#img2img">img2img</a>
       <a href="#presets">Presets</a>
       <a href="#prompt-history">Prompt History</a>
+      <a href="#prompt-search">Prompt Search</a>
+      <a href="#queue">Generation Queue</a>
+      <a href="#upscale">Upscaling</a>
 
       <h4>Interface</h4>
       <a href="#themes">Themes</a>
@@ -480,8 +483,23 @@ bar_text: "#000000"</code></pre>
         <li><code>enter</code> / <code>space</code> — fullscreen preview</li>
         <li><code>^e</code> — open in your system image viewer</li>
         <li><code>p</code> — load the prompt and settings from this image</li>
+        <li><code>u</code> — upscale the image 4x with Real-ESRGAN</li>
         <li><code>delete</code> / <code>backspace</code> — delete the image</li>
       </ul>
+
+      <h2 id="upscale">Upscaling</h2>
+      <p>Press <code>u</code> on any image in the gallery to upscale it 4x with Real-ESRGAN. The upscaler weights (~60 MB) are downloaded automatically the first time you use it. The upscaled image is saved alongside the original with a <code>-4x</code> suffix, and both the standard and anime variants of Real-ESRGAN are supported.</p>
+
+      <h2 id="queue">Generation Queue</h2>
+      <p>Chewy can queue multiple generations and run them back-to-back without waiting for each to finish:</p>
+      <ul>
+        <li><code>alt+q</code> — queue the current prompt. It will start as soon as the running generation completes.</li>
+        <li><code>alt+s</code> — seed sweep: queue 4 variants of the current prompt with random seeds.</li>
+      </ul>
+      <p>Queue depth is shown in the status bar. Good for exploring a prompt while stepping away from the keyboard.</p>
+
+      <h2 id="prompt-search">Prompt Search</h2>
+      <p>Press <code>alt+h</code> in the prompt field to open a fuzzy-searchable view of your prompt history. Type to filter by substring or character set, use up/down to navigate results, and press enter to load the selected prompt into the prompt field.</p>
 
       <h2 id="shortcuts">Keyboard Shortcuts</h2>
 
@@ -518,6 +536,21 @@ bar_text: "#000000"</code></pre>
         <tbody>
           <tr><td><code>up</code></td><td>Previous prompt from history</td></tr>
           <tr><td><code>down</code></td><td>Next prompt from history</td></tr>
+          <tr><td><code>alt+h</code></td><td>Search prompt history (fuzzy)</td></tr>
+          <tr><td><code>alt+q</code></td><td>Queue current generation</td></tr>
+          <tr><td><code>alt+s</code></td><td>Seed sweep (queue 4 random seeds)</td></tr>
+          <tr><td>click</td><td>Move cursor to clicked position</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Gallery</h3>
+      <table>
+        <thead><tr><th>Key</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td><code>enter</code> / <code>space</code></td><td>Fullscreen preview</td></tr>
+          <tr><td><code>p</code></td><td>Load prompt + settings from image</td></tr>
+          <tr><td><code>u</code></td><td>Upscale image (Real-ESRGAN 4x)</td></tr>
+          <tr><td><code>delete</code> / <code>backspace</code></td><td>Delete image</td></tr>
         </tbody>
       </table>
 
