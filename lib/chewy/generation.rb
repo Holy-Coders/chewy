@@ -18,8 +18,8 @@ class Chewy
         if name.include?("schnell")
           return [self, set_error_toast("Schnell models are poor at img2img — use FLUX Dev, SD 1.5, or SDXL instead")]
         end
-        if flux2_model?(@selected_model_path)
-          return [self, set_error_toast("FLUX.2 Klein is text-to-image only in chewy — remove the init image")]
+        if flux2_model?(@selected_model_path) && !flux2_dev_model?(@selected_model_path)
+          return [self, set_error_toast("FLUX.2 Klein is text-to-image only — use FLUX.2 Dev for image editing")]
         end
         if z_image_model?(@selected_model_path)
           return [self, set_error_toast("Z-Image is text-to-image only in chewy — remove the init image")]
@@ -168,7 +168,7 @@ class Chewy
         flux2_llm: is_flux2 ? flux2_companion_path("llm") : nil,
         flux2_vae: is_flux2 ? flux2_companion_path("vae") : nil,
         is_kontext: is_kontext,
-        ref_image: is_kontext ? @init_image_path : nil,
+        ref_image: (is_kontext || (is_flux2 && flux2_dev_model?(@selected_model_path) && @init_image_path)) ? @init_image_path : nil,
         is_chroma: is_chroma,
         chroma_t5xxl: is_chroma ? flux_companion_path("t5xxl") : nil,
         chroma_vae: is_chroma ? flux_companion_path("vae") : nil,

@@ -327,7 +327,7 @@ class LocalSdCppProvider < Provider::Base
     args += ["--negative-prompt", request.negative_prompt] unless request.negative_prompt.empty?
     args += ["--flow-shift", request.flow_shift.to_s] if request.is_wan && request.flow_shift
     args += ["--lora-model-dir", @lora_dir] if request.loras&.any? && !request.is_flux && !request.is_flux2 && !request.is_z_image && !request.is_qwen_image && !request.is_wan
-    if request.is_kontext && request.ref_image
+    if request.ref_image
       args += ["-r", request.ref_image]
     elsif request.init_image && !request.is_flux2 && !request.is_z_image && !request.is_qwen_image
       args += ["--init-img", request.init_image]

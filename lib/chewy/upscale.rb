@@ -49,6 +49,10 @@ class Chewy
 
       sd_bin = @sd_bin
       model_path = esrgan_path
+      @generating = true
+      @gen_start_time = Time.now
+      @gen_step = 0
+      @gen_total_steps = 0
       @gen_status = "Upscaling #{File.basename(src_path)}..."
 
       cmd = Proc.new do
@@ -79,13 +83,17 @@ class Chewy
     end
 
     def handle_upscale_done(message)
+      @generating = false
       @gen_status = nil
+      @gen_start_time = nil
       build_gallery if @overlay == :gallery
       [self, set_status_toast("Upscaled in #{message.elapsed}s — #{File.basename(message.output_path)}")]
     end
 
     def handle_upscale_error(message)
+      @generating = false
       @gen_status = nil
+      @gen_start_time = nil
       [self, set_error_toast("Upscale failed: #{message.error}")]
     end
   end

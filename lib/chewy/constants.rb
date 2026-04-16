@@ -231,6 +231,17 @@ Z_IMAGE_COMPANION_FILES = {
 # FLUX.2 companion files — variant depends on diffusion model size
 # 4B model pairs with Qwen3-4B, 9B model pairs with Qwen3-8B. VAE is shared.
 FLUX2_COMPANION_FILES = {
+  # FLUX.2 Dev uses Mistral-Small-3.2-24B as its text encoder (not Qwen3).
+  :_dev => {
+    "llm" => {
+      filename: "Mistral-Small-3.2-24B-Instruct-2506-Q3_K_M.gguf",
+      url: "https://huggingface.co/unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF/resolve/main/Mistral-Small-3.2-24B-Instruct-2506-Q3_K_M.gguf",
+    },
+    "vae" => {
+      filename: "flux2-vae.safetensors",
+      url: "https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/resolve/main/split_files/vae/flux2-vae.safetensors",
+    },
+  },
   :_9b => {
     "llm" => {
       filename: "Qwen3-8B-Q4_K_M.gguf",

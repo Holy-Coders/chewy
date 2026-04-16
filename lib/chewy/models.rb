@@ -42,7 +42,8 @@ class Chewy
           type_tag = model_type_tag(f)
           family = model_family_for(detect_model_type(f))
           family_tag = family ? " [#{family}]" : ""
-          { title: "#{prefix}#{name}", description: "#{type_tag}#{family_tag}#{source}".strip }
+          size_str = File.exist?(f) ? format_bytes(File.size(f)) : ""
+          { title: "#{prefix}#{name}", description: "#{size_str} #{type_tag}#{family_tag}#{source}".strip }
         end
       end
 
@@ -368,8 +369,15 @@ class Chewy
       basename.match?(/flux[-_]?2|klein/)
     end
 
-    # FLUX.2 comes in 4B and 9B variants — each pairs with a different Qwen3 size
+    # FLUX.2 Dev supports image editing via sd.cpp's -r flag; Klein is text-to-image only.
+    def flux2_dev_model?(path)
+      return false unless flux2_model?(path)
+      File.basename(path).downcase.include?("dev")
+    end
+
+    # FLUX.2 Dev uses Mistral-Small; Klein 4B/9B use Qwen3-4B/8B respectively.
     def flux2_variant(path)
+      return :_dev if flux2_dev_model?(path)
       basename = File.basename(path.to_s).downcase
       basename.match?(/(?:^|[^0-9])4b(?:[^0-9]|$)/) ? :_4b : :_9b
     end
