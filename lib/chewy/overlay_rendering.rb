@@ -494,11 +494,19 @@ class Chewy
         Lipgloss.join_vertical(:left, title_bar, body)
       )
 
-      status_text = "enter: fullscreen | p: load params | c: copy | u: upscale | ^e: open | del: delete | j/k: navigate | esc: close"
-      key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
-      desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
-      status = Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE)
-        .render(format_help_text(status_text, key_style, desc_style))
+      status = if @error_message
+        Lipgloss::Style.new.background(Theme.ERROR).foreground(Theme.BAR_TEXT).width(@width).padding(0, 1)
+          .render("! #{@error_message}")
+      elsif @status_message
+        Lipgloss::Style.new.background(Theme.PRIMARY).foreground(Theme.BAR_TEXT).width(@width).padding(0, 1)
+          .render(@status_message)
+      else
+        status_text = "enter: fullscreen | p: load params | c: copy | u: upscale | ^e: open | del: delete | j/k: navigate | esc: close"
+        key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
+        desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+        Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE)
+          .render(format_help_text(status_text, key_style, desc_style))
+      end
 
       Lipgloss.join_vertical(:left, outer, status)
     end
@@ -998,7 +1006,7 @@ class Chewy
       muted = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
 
       lines = []
-      lines << dim.render("Tokens enable gated/NSFW downloads and higher rate limits.")
+      lines << dim.render("Tokens enable gated and restricted downloads and higher rate limits.")
       lines << dim.render("Env vars ") + accent.render("HF_TOKEN") + dim.render(" / ") + accent.render("CIVITAI_TOKEN") + dim.render(" override these.")
       lines << ""
       lines << (@tokens_field == 0 ? active.render("› HuggingFace") : muted.render("  HuggingFace"))

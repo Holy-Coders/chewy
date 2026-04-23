@@ -195,6 +195,7 @@ class Chewy
     @hf_token_input.prompt = ""
     @hf_token_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
     @hf_token_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
+    @hf_token_input.echo_mode = Bubbles::TextInput::ECHO_PASSWORD
     @hf_token_pending_action = nil
 
     # Download tokens overlay (HF + Civitai)
@@ -203,11 +204,13 @@ class Chewy
     @tokens_hf_input.prompt = ""
     @tokens_hf_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
     @tokens_hf_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
+    @tokens_hf_input.echo_mode = Bubbles::TextInput::ECHO_PASSWORD
     @tokens_civitai_input = Bubbles::TextInput.new
     @tokens_civitai_input.placeholder = "civitai api key"
     @tokens_civitai_input.prompt = ""
     @tokens_civitai_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
     @tokens_civitai_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
+    @tokens_civitai_input.echo_mode = Bubbles::TextInput::ECHO_PASSWORD
     @tokens_field = 0  # 0 = HF, 1 = Civitai
 
     # API key input (for remote providers)
@@ -216,6 +219,7 @@ class Chewy
     @api_key_input.prompt = ""
     @api_key_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
     @api_key_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
+    @api_key_input.echo_mode = Bubbles::TextInput::ECHO_PASSWORD
 
     # Image preview cache
     @preview_cache = nil
