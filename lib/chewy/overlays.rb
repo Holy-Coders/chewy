@@ -20,6 +20,7 @@ class Chewy
       clear_kitty_images if @kitty_graphics
       @overlay = name
       @error_message = nil
+      cmd = nil
 
       case name
       when :models then @provider.provider_type == :api ? scan_api_models : scan_models
@@ -29,10 +30,14 @@ class Chewy
       when :preset then nil
       when :theme then @theme_index = THEME_NAMES.index(Theme.current_name) || 0; @theme_original = Theme.current_name
       when :provider then @provider_index = @providers.index(@provider) || 0
-      when :gallery then build_gallery
-      when :file_picker then scan_file_picker_dir
+      when :gallery
+        build_gallery
+        _model, cmd = gallery_load_thumb_async unless @gallery_preview_ready
+      when :file_picker
+        scan_file_picker_dir
+        _model, cmd = kickoff_file_picker_preview
       end
-      [self, nil]
+      [self, cmd]
     end
 
     def close_overlay
@@ -134,11 +139,12 @@ class Chewy
         when "y"
           source = @pending_best_settings_img2img ? IMG2IMG_BEST_SETTINGS : MODEL_BEST_SETTINGS
           settings = source[@pending_best_settings_type]
-          load_preset({ data: settings }) if settings
+          cmd = settings ? load_preset({ data: settings }) : nil
           @confirm_apply_best_settings = false
           @pending_best_settings_type = nil
           @pending_best_settings_img2img = false
-          return close_overlay
+          close_overlay
+          return [self, cmd]
         else
           @confirm_apply_best_settings = false
           @pending_best_settings_type = nil
@@ -302,6 +308,7 @@ class Chewy
       @gallery_images = entries.first(100)
       @gallery_index = 0
       @gallery_thumb_cache = {}
+      @gallery_preview_ready = @kitty_graphics || @gallery_images.empty?
     end
 
     def gallery_meta(entry)
@@ -329,6 +336,11 @@ class Chewy
       return [self, nil] if @gallery_images.empty?
       entry = @gallery_images[@gallery_index]
       return [self, nil] unless entry && entry[:path]
+
+      if @kitty_graphics
+        @gallery_preview_ready = true
+        return [self, nil]
+      end
 
       if @gallery_thumb_cache[entry[:path]]
         @gallery_preview_ready = true
@@ -408,6 +420,9 @@ class Chewy
       when "u"
         entry = @gallery_images[@gallery_index]
         return start_upscale(entry[:path]) if entry
+      when "c"
+        entry = @gallery_images[@gallery_index]
+        return copy_image_to_clipboard(entry[:path]) if entry
       end
       [self, nav_cmd]
     end
@@ -542,8 +557,9 @@ class Chewy
       when "down", "j"
         @preset_index = (@preset_index + 1) % [all.length, 1].max
       when "enter"
-        load_preset(all[@preset_index]) if all[@preset_index]
-        return close_overlay
+        cmd = all[@preset_index] ? load_preset(all[@preset_index]) : nil
+        close_overlay
+        return [self, cmd]
       when "s"
         @naming_preset = true; @preset_name_buffer = ""
       when "d"
@@ -561,6 +577,7 @@ class Chewy
 
     def load_preset(preset)
       d = preset[:data]
+      toast_cmd = nil
       @params[:steps] = d["steps"] if d["steps"]
       @params[:cfg_scale] = d["cfg_scale"].to_f if d["cfg_scale"]
       @params[:width] = d["width"] if d["width"]
@@ -600,10 +617,17 @@ class Chewy
       if d["model"] && File.exist?(d["model"])
         @selected_model_path = d["model"]
         @preview_cache = nil
+      elsif d["model"]
+        toast_cmd = set_error_toast("Preset model is missing: #{File.basename(d["model"])}")
       elsif d["model_type"] && @provider.provider_type == :local
-        select_model_by_type(d["model_type"])
+        selected = select_model_by_type(d["model_type"])
+        unless selected
+          label = d["model_type"].to_s.casecmp("wan").zero? ? "Wan video" : d["model_type"]
+          toast_cmd = set_error_toast("No #{label} model is installed for this preset — press ^d to download one")
+        end
       end
       update_param_keys
+      toast_cmd
     end
 
     def save_user_preset(name)
@@ -666,7 +690,7 @@ class Chewy
         File.expand_path("~")
       end
       scan_file_picker_dir
-      [self, nil]
+      kickoff_file_picker_preview
     end
 
     def open_controlnet_model_picker
@@ -692,7 +716,7 @@ class Chewy
         @models_dir || File.expand_path("~/.config/chewy/models")
       end
       scan_file_picker_dir
-      [self, nil]
+      kickoff_file_picker_preview
     end
 
     def scan_file_picker_dir
@@ -728,6 +752,7 @@ class Chewy
       @file_picker_index = 0
       @file_picker_scroll = 0
       @file_picker_thumb_cache = {}
+      @file_picker_preview_ready = @kitty_graphics || !file_picker_preview_needed?
     end
 
     PICKER_DEBOUNCE = 0.15 # seconds to wait before loading preview
@@ -740,9 +765,28 @@ class Chewy
       Bubbletea.tick(PICKER_DEBOUNCE) { FilePickerPreviewMessage.new(generation: gen) }
     end
 
+    def file_picker_preview_needed?(entry = @file_picker_entries[@file_picker_index])
+      entry && entry[:type] == :file && @file_picker_target != :cn_model
+    end
+
+    def kickoff_file_picker_preview
+      @file_picker_preview_ready = @kitty_graphics || !file_picker_preview_needed?
+      return [self, nil] if @file_picker_preview_ready
+
+      file_picker_load_thumb_async
+    end
+
     def file_picker_load_thumb_async
       entry = @file_picker_entries[@file_picker_index]
-      return [self, nil] unless entry && entry[:type] == :file && @file_picker_target != :cn_model
+      unless file_picker_preview_needed?(entry)
+        @file_picker_preview_ready = true
+        return [self, nil]
+      end
+
+      if @kitty_graphics
+        @file_picker_preview_ready = true
+        return [self, nil]
+      end
 
       # Already cached — show immediately
       if @file_picker_thumb_cache[entry[:path]]
@@ -785,6 +829,7 @@ class Chewy
         if entry[:type] == :dir
           @file_picker_dir = entry[:path]
           scan_file_picker_dir
+          return kickoff_file_picker_preview
         else
           case @file_picker_target
           when :controlnet
@@ -821,10 +866,12 @@ class Chewy
         unless parent == @file_picker_dir
           @file_picker_dir = parent
           scan_file_picker_dir
+          return kickoff_file_picker_preview
         end
       when "~"
         @file_picker_dir = File.expand_path("~")
         scan_file_picker_dir
+        return kickoff_file_picker_preview
       end
 
       # Keep scroll in view

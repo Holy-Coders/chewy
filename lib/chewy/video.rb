@@ -181,13 +181,26 @@ class Chewy
       frame_path = frame_count > 0 ? @video_frame_paths[current] : nil
 
       frame_img = if frame_path && File.exist?(frame_path)
-        render_image_halfblocks(frame_path, img_w, img_h, corner_radius: 3)
+        if @kitty_graphics
+          render_image(frame_path, img_w, img_h, kitty_overlay: true)
+        else
+          render_image_halfblocks(frame_path, img_w, img_h, corner_radius: 3)
+        end
       end
 
       frame_view = if frame_img
-        center_image(frame_img, inner_w)
+        @kitty_graphics ? frame_img : center_image(frame_img, inner_w)
       else
         center.call(dim.render("No frame available"))
+      end
+
+      if @kitty_graphics && frame_path && File.exist?(frame_path)
+        # Whole-screen render adds 1 row / 2 cols of outer padding around the panel.
+        # The panel itself has a border and 1x2 inner padding, and the frame area
+        # starts after the header plus a spacer line.
+        frame_row = 6
+        frame_col = 8
+        @kitty_overlay_pending = { path: frame_path, row: frame_row, col: frame_col, w: img_w, h: img_h, slot: 30, rounded: false }
       end
 
       # Progress bar

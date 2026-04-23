@@ -235,13 +235,14 @@ class Chewy
       # Handle img2img best-settings confirmation on main view
       if @confirm_apply_best_settings && @pending_best_settings_img2img
         source = IMG2IMG_BEST_SETTINGS[@pending_best_settings_type]
+        cmd = nil
         if key == "y" && source
-          load_preset({ data: source })
+          cmd = load_preset({ data: source })
         end
         @confirm_apply_best_settings = false
         @pending_best_settings_type = nil
         @pending_best_settings_img2img = false
-        return [self, nil]
+        return [self, cmd]
       end
 
       # Global shortcuts (work everywhere, including text inputs)
@@ -525,6 +526,38 @@ class Chewy
       rescue => e
         File.delete(dest) rescue nil if dest
         ClipboardPasteMessage.new(error: e.message)
+      end
+
+      [self, cmd]
+    end
+
+    def copy_image_to_clipboard(path)
+      return [self, nil] unless path && File.exist?(path)
+
+      cmd = Proc.new do
+        begin
+          if RUBY_PLATFORM.include?("darwin")
+            # macOS: use osascript to copy image to clipboard
+            escaped_path = File.expand_path(path).gsub("\\", "\\\\\\\\").gsub('"', '\\\\"')
+            script = "set the clipboard to (read (POSIX file \"#{escaped_path}\") as «class PNGf»)"
+            _, status = Open3.capture2("osascript", "-e", script)
+            if status.success?
+              ClipboardCopyMessage.new
+            else
+              ClipboardCopyMessage.new(error: "osascript failed")
+            end
+          else
+            # Linux: try xclip
+            _, status = Open3.capture2("xclip", "-selection", "clipboard", "-t", "image/png", "-i", path)
+            if status.success?
+              ClipboardCopyMessage.new
+            else
+              ClipboardCopyMessage.new(error: "xclip failed (is it installed?)")
+            end
+          end
+        rescue => e
+          ClipboardCopyMessage.new(error: e.message)
+        end
       end
 
       [self, cmd]

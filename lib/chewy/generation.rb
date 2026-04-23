@@ -34,6 +34,15 @@ class Chewy
         return [self, set_error_toast("FLUX.1 Kontext requires a reference image — press ^b to select one")]
       end
 
+      if @provider.provider_type == :local && @selected_model_path && wan_model?(@selected_model_path)
+        if @init_image_path && wan_t2v_model?(@selected_model_path)
+          return [self, set_error_toast("Selected Wan model is text-to-video only — clear the init image or install a Wan I2V model")]
+        end
+        if !@init_image_path && wan_i2v_model?(@selected_model_path)
+          return [self, set_error_toast("Selected Wan model needs an init image — press ^b to pick a starting frame")]
+        end
+      end
+
       # ControlNet is not supported with FLUX or Wan models
       if @controlnet_model_path && @provider.provider_type == :local && @selected_model_path
         if flux_model?(@selected_model_path) || flux2_model?(@selected_model_path)
@@ -50,16 +59,17 @@ class Chewy
 
       # Memory warning for local models — warn but allow user to proceed
       if @provider.provider_type == :local && @selected_model_path && !@confirm_low_memory
-        model_size = File.size(@selected_model_path) rescue 0
         available_mem = estimate_available_memory
-        # Model needs roughly 1.5x its file size in RAM (2x for video models)
-        mem_multiplier = wan_model?(@selected_model_path) ? 2.0 : 1.5
-        estimated_need = (model_size * mem_multiplier).to_i
+        estimated_need = estimate_runtime_memory_need(@selected_model_path)
         if available_mem > 0 && estimated_need > available_mem
-          model_gb = (model_size / 1_073_741_824.0).round(1)
+          need_gb = (estimated_need / 1_073_741_824.0).round(1)
           avail_gb = (available_mem / 1_073_741_824.0).round(1)
           @confirm_low_memory = true
-          @low_memory_warning = "#{File.basename(@selected_model_path)} needs ~#{model_gb}GB but only #{avail_gb}GB available"
+          @low_memory_warning = if wan_model?(@selected_model_path)
+            "#{File.basename(@selected_model_path)} needs ~#{need_gb}GB for #{@params[:video_frames]} frames at #{@params[:width]}x#{@params[:height]}, but only #{avail_gb}GB is available"
+          else
+            "#{File.basename(@selected_model_path)} needs ~#{need_gb}GB but only #{avail_gb}GB is available"
+          end
           return [self, nil]
         end
       end
@@ -131,6 +141,7 @@ class Chewy
       # Dynamic thread count based on current system load
       if @provider.provider_type == :local
         @params[:threads] = safe_thread_count
+        @params[:threads] = [@params[:threads], 4].min if wan_model?(@selected_model_path)
       end
 
       # Build provider-agnostic request
@@ -301,6 +312,29 @@ class Chewy
     def open_image(path)
       opener = RUBY_PLATFORM.include?("darwin") ? "open" : "xdg-open"
       spawn(opener, path, [:out, :err] => "/dev/null")
+    end
+
+    def estimate_runtime_memory_need(path)
+      model_size = File.size(path) rescue 0
+      return 0 if model_size <= 0
+
+      if wan_model?(path)
+        frame_factor = [(@params[:video_frames] || 17).to_f / 17.0, 1.0].max
+        pixel_count = (@params[:width] || 384).to_i * (@params[:height] || 672).to_i
+        base_pixels = 384 * 672
+        resolution_factor = Math.sqrt([pixel_count.to_f / base_pixels, 1.0].max)
+        i2v_factor = @init_image_path ? 1.25 : 1.0
+        return (model_size * 2.0 * frame_factor * resolution_factor * i2v_factor).to_i
+      end
+
+      multiplier = if flux2_model?(path) || flux_model?(path) || chroma_model?(path) || z_image_model?(path) || qwen_image_model?(path)
+        1.8
+      elsif detect_model_type(path) == "SDXL"
+        1.7
+      else
+        1.5
+      end
+      (model_size * multiplier).to_i
     end
 
     def generate_quick_mask

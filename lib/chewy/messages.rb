@@ -69,6 +69,11 @@ class ClipboardPasteMessage < Bubbletea::Message
   def initialize(path: nil, error: nil) @path = path; @error = error end
 end
 
+class ClipboardCopyMessage < Bubbletea::Message
+  attr_reader :error
+  def initialize(error: nil) @error = error end
+end
+
 class StatusDismissMessage < Bubbletea::Message
   attr_reader :generation
   def initialize(generation:) @generation = generation end

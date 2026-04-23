@@ -293,10 +293,6 @@ class Chewy
       return [self, nil] if missing.empty?
 
       hf_token = resolve_hf_token
-      unless hf_token
-        @hf_token_pending_action = :qwen_image_companions
-        return open_overlay(:hf_token)
-      end
 
       @companion_downloading = true
       @companion_remaining = missing.size
@@ -327,10 +323,6 @@ class Chewy
       return [self, nil] if missing.empty?
 
       hf_token = resolve_hf_token
-      unless hf_token
-        @hf_token_pending_action = :z_image_companions
-        return open_overlay(:hf_token)
-      end
 
       @companion_downloading = true
       @companion_remaining = missing.size
@@ -405,10 +397,6 @@ class Chewy
       return [self, nil] if missing.empty?
 
       hf_token = resolve_hf_token
-      unless hf_token
-        @hf_token_pending_action = :flux2_companions
-        return open_overlay(:hf_token)
-      end
 
       @companion_downloading = true
       @companion_remaining = missing.size
@@ -426,29 +414,44 @@ class Chewy
       basename.include?("wan2") || basename.include?("wan-") || basename.include?("wan_")
     end
 
+    def wan_i2v_model?(path)
+      return false unless wan_model?(path)
+      File.basename(path).downcase.include?("i2v")
+    end
+
+    def wan_t2v_model?(path)
+      return false unless wan_model?(path)
+      basename = File.basename(path).downcase
+      basename.include?("t2v") || !wan_i2v_model?(path)
+    end
+
+    def required_wan_companion_keys(path = @selected_model_path, init_image: @init_image_path)
+      keys = %w[t5xxl vae]
+      keys << "clip_vision" if init_image || wan_i2v_model?(path)
+      keys
+    end
+
     def wan_companion_path(key)
       info = WAN_COMPANION_FILES[key]
       return nil unless info
       File.join(@models_dir, info[:filename])
     end
 
-    def wan_companions_present?
-      WAN_COMPANION_FILES.all? { |key, _| File.exist?(wan_companion_path(key)) }
+    def wan_companions_present?(path = @selected_model_path, init_image: @init_image_path)
+      required_wan_companion_keys(path, init_image: init_image).all? { |key| File.exist?(wan_companion_path(key)) }
     end
 
-    def missing_wan_companions
-      WAN_COMPANION_FILES.select { |key, _| !File.exist?(wan_companion_path(key)) }
+    def missing_wan_companions(path = @selected_model_path, init_image: @init_image_path)
+      WAN_COMPANION_FILES.select { |key, _|
+        required_wan_companion_keys(path, init_image: init_image).include?(key) && !File.exist?(wan_companion_path(key))
+      }
     end
 
-    def download_wan_companions
-      missing = missing_wan_companions
+    def download_wan_companions(path = @selected_model_path, init_image: @init_image_path)
+      missing = missing_wan_companions(path, init_image: init_image)
       return [self, nil] if missing.empty?
 
       hf_token = resolve_hf_token
-      unless hf_token
-        @hf_token_pending_action = :wan_companions
-        return open_overlay(:hf_token)
-      end
 
       @companion_downloading = true
       @companion_remaining = missing.size
@@ -497,10 +500,6 @@ class Chewy
       return [self, nil] if missing.empty?
 
       hf_token = resolve_hf_token
-      unless hf_token
-        @hf_token_pending_action = :flux_companions
-        return open_overlay(:hf_token)
-      end
 
       @companion_downloading = true
       @companion_remaining = missing.size
@@ -547,7 +546,7 @@ class Chewy
         curl_base = ["curl", "-fL", "-o", part, "-sS",
                      "-C", "-", "--retry", "3", "--retry-delay", "2", "--retry-all-errors"]
         _out, err, st = Open3.capture3(*curl_base, url)
-        unless st.success?
+        unless st.success? || hf_token.to_s.empty?
           # Retry with auth token for gated repos
           File.delete(part) if File.exist?(part)
           _out, err, st = Open3.capture3(*curl_base, "-H", "Authorization: Bearer #{hf_token}", url)
@@ -557,7 +556,8 @@ class Chewy
           CompanionDownloadDoneMessage.new(name: name)
         else
           File.delete(part) if File.exist?(part)
-          CompanionDownloadErrorMessage.new(name: name, error: "curl failed: #{err.strip}")
+          hint = hf_token.to_s.empty? ? " (if this repo is gated, add a HuggingFace token)" : ""
+          CompanionDownloadErrorMessage.new(name: name, error: "curl failed#{hint}: #{err.strip}")
         end
       rescue => e
         File.delete(part) rescue nil
@@ -591,6 +591,8 @@ class Chewy
         @selected_model_path = match
         @preview_cache = nil
       end
+
+      match
     end
 
     def api_model_type(model)

@@ -4,6 +4,12 @@ class Chewy
   module Downloads
     private
 
+    def hf_resolve_url(repo_id, path)
+      encoded_repo = repo_id.to_s.split("/").map { |segment| URI.encode_www_form_component(segment) }.join("/")
+      encoded_path = path.to_s.split("/").map { |segment| URI.encode_www_form_component(segment) }.join("/")
+      "#{HF_DOWNLOAD_BASE}/#{encoded_repo}/resolve/main/#{encoded_path}"
+    end
+
     def enter_download_mode
       case @focus
       when FOCUS_PROMPT then @prompt_input.blur
@@ -180,6 +186,7 @@ class Chewy
           # Filter out companion/auxiliary files and LoRAs
           next false if COMPANION_FILE_PATTERNS.any? { |p| basename.start_with?(p) }
           next false if basename =~ /\blora\b/i
+          next false if basename =~ /\bcontrol\b/i
           # FLUX repos: only GGUF works with sd.cpp
           next false if is_flux && !f["path"].end_with?(".gguf")
           true
@@ -223,11 +230,12 @@ class Chewy
       if disk_free > 0 && size.to_i > 0 && size.to_i > disk_free - 500_000_000
         return set_error_toast("Not enough disk space (#{format_bytes(disk_free)} free, need #{format_bytes(size)})")
       end
-      FileUtils.mkdir_p(@models_dir)
-      dest = File.join(@models_dir, filename); part = "#{dest}.part"
+      dest = File.join(@models_dir, filename)
+      FileUtils.mkdir_p(File.dirname(dest))
+      part = "#{dest}.part"
       @model_downloading = true; @download_dest = part
-      @download_total = size || 0; @download_filename = filename; @error_message = nil
-      url = "#{HF_DOWNLOAD_BASE}/#{repo_id}/resolve/main/#{URI.encode_www_form_component(filename)}"
+      @download_total = size || 0; @download_filename = File.basename(filename); @error_message = nil
+      url = hf_resolve_url(repo_id, filename)
       captured_repo = repo_id
       Proc.new do
         _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",
@@ -254,12 +262,23 @@ class Chewy
       @model_downloading = false; @download_dest = nil; @download_filename = ""
       @error_message = nil
       save_config if @model_sources && !@model_sources.empty?
-      scan_models
       if @overlay == :cn_download
         return exit_cn_download
       end
+      selectable = if message.path && File.exist?(message.path)
+        basename = File.basename(message.path).downcase
+        !COMPANION_FILE_PATTERNS.any? { |p| basename.start_with?(p) } &&
+          basename !~ /\blora\b/i &&
+          basename !~ /\bcontrol\b/i
+      end
+      @selected_model_path = message.path if selectable
+      scan_models
+      filter_loras
+      update_param_keys
+      save_config
       @overlay = :models
-      [self, set_status_toast("Downloaded #{message.filename}")]
+      toast = selectable ? "Downloaded #{File.basename(message.filename)} and selected it" : "Downloaded #{File.basename(message.filename)}"
+      [self, set_status_toast(toast)]
     end
 
     def handle_download_key(message)
@@ -316,7 +335,13 @@ class Chewy
           m = PRELOADED_MODELS[model_idx]
           dest = File.join(@models_dir, m[:file])
           if File.exist?(dest)
-            return [self, set_error_toast("#{m[:name]} is already installed")]
+            @selected_model_path = dest
+            scan_models
+            filter_loras
+            update_param_keys
+            save_config
+            @overlay = :models
+            return [self, set_status_toast("#{m[:name]} is already installed and selected")]
           end
           return [self, start_model_download(m[:repo], m[:file], m[:size])]
         elsif model_idx == PRELOADED_MODELS.length
@@ -430,8 +455,9 @@ class Chewy
       if disk_free > 0 && size.to_i > 0 && size.to_i > disk_free - 500_000_000
         return set_error_toast("Not enough disk space (#{format_bytes(disk_free)} free, need #{format_bytes(size)})")
       end
-      FileUtils.mkdir_p(@models_dir)
-      dest = File.join(@models_dir, filename); part = "#{dest}.part"
+      dest = File.join(@models_dir, filename)
+      FileUtils.mkdir_p(File.dirname(dest))
+      part = "#{dest}.part"
       @model_downloading = true; @download_dest = part
       @download_total = size || 0; @download_filename = filename; @error_message = nil
       Proc.new do
@@ -592,7 +618,7 @@ class Chewy
       dest = File.join(@lora_dir, File.basename(filename)); part = "#{dest}.part"
       @lora_downloading = true; @lora_download_dest = part
       @lora_download_total = size || 0; @lora_download_filename = File.basename(filename); @error_message = nil
-      url = "#{HF_DOWNLOAD_BASE}/#{repo_id}/resolve/main/#{URI.encode_www_form_component(filename)}"
+      url = hf_resolve_url(repo_id, filename)
       Proc.new do
         _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",
           "-C", "-", "--retry", "5", "--retry-delay", "3", "--retry-all-errors",
@@ -874,11 +900,12 @@ class Chewy
       if disk_free > 0 && size.to_i > 0 && size.to_i > disk_free - 500_000_000
         return set_error_toast("Not enough disk space (#{format_bytes(disk_free)} free, need #{format_bytes(size)})")
       end
-      FileUtils.mkdir_p(@models_dir)
-      dest = File.join(@models_dir, local_filename); part = "#{dest}.part"
+      dest = File.join(@models_dir, local_filename)
+      FileUtils.mkdir_p(File.dirname(dest))
+      part = "#{dest}.part"
       @model_downloading = true; @download_dest = part
       @download_total = size || 0; @download_filename = local_filename; @error_message = nil
-      url = "#{HF_DOWNLOAD_BASE}/#{repo_id}/resolve/main/#{URI.encode_www_form_component(hf_filename)}"
+      url = hf_resolve_url(repo_id, hf_filename)
       Proc.new do
         _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",
           "-C", "-", "--retry", "5", "--retry-delay", "3", "--retry-all-errors",
@@ -994,7 +1021,7 @@ class Chewy
 
       # For controlnet models with hf_path, use that for the URL
       hf_file = item[:hf_path] || item[:file]
-      url = "#{HF_DOWNLOAD_BASE}/#{item[:repo]}/resolve/main/#{URI.encode_www_form_component(hf_file)}"
+      url = hf_resolve_url(item[:repo], hf_file)
 
       cmd = Proc.new do
         _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",

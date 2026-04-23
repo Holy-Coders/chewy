@@ -456,6 +456,12 @@ class Chewy
         @controlnet_image_path = message.path if @controlnet_model_path
         [self, set_status_toast("Pasted image: #{File.basename(message.path)}")]
       end
+    when ClipboardCopyMessage
+      if message.error
+        [self, set_error_toast("Copy failed: #{message.error}")]
+      else
+        [self, set_status_toast("Copied image to clipboard")]
+      end
     when ModelValidatedMessage
       handle_model_validated(message)
     when FilePickerPreviewMessage

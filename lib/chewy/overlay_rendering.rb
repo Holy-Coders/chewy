@@ -30,7 +30,7 @@ class Chewy
 
           is_wan = wan_model?(path)
           type_tag = if is_wan
-            ok = wan_companions_present?
+            ok = wan_companions_present?(path)
             s = Lipgloss::Style.new.foreground(ok ? Theme.SUCCESS : Theme.WARNING).bold(true)
             s.render(ok ? "Wan VIDEO" : "Wan (needs companions)")
           elsif is_flux2
@@ -482,7 +482,7 @@ class Chewy
         if @gallery_preview_ready && @kitty_graphics && entry[:path] && File.exist?(entry[:path])
           gallery_img_row = 1 + 1 + 1 + 1
           gallery_img_col = 2 + 1 + list_w + 1 + 1
-          @kitty_overlay_pending = { path: entry[:path], row: gallery_img_row, col: gallery_img_col, w: preview_w - 4, h: thumb_h, slot: 21 }
+          @kitty_overlay_pending = { path: entry[:path], row: gallery_img_row, col: gallery_img_col, w: preview_w - 4, h: thumb_h, slot: 21, rounded: false }
         end
       end
 
@@ -494,7 +494,7 @@ class Chewy
         Lipgloss.join_vertical(:left, title_bar, body)
       )
 
-      status_text = "enter: fullscreen | p: load params | u: upscale | ^e: open | del: delete | j/k: navigate | esc: close"
+      status_text = "enter: fullscreen | p: load params | c: copy | u: upscale | ^e: open | del: delete | j/k: navigate | esc: close"
       key_style = Lipgloss::Style.new.foreground(Theme.TEXT_DIM).bold(true)
       desc_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
       status = Lipgloss::Style.new.width(@width).padding(0, 1).background(Theme.SURFACE)

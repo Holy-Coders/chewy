@@ -16,6 +16,7 @@ class Chewy
       0x20DB, 0x20DC, 0x20E1, 0x20E7, 0x20E9, 0x20EA, 0x20EB, 0x20EC,
       0x20ED, 0x20EE, 0x20EF, 0x20F0,
     ].freeze
+    PNG_SIGNATURE = "\x89PNG\r\n\x1a\n".b.freeze
 
     # Center a rendered image (with ANSI escape codes) horizontally within a given width
     def center_image(img_str, target_width)
@@ -234,36 +235,51 @@ class Chewy
       colors[1] # midpoint blend of primary and accent
     end
 
+    def png_dimensions(path)
+      header = File.binread(path, 24)
+      return nil unless header && header.bytesize == 24
+      return nil unless header.start_with?(PNG_SIGNATURE)
+      return nil unless header.byteslice(12, 4) == "IHDR"
+
+      header.byteslice(16, 8).unpack("NN")
+    rescue
+      nil
+    end
+
+    def kitty_image_payload(path, rounded: true)
+      if !rounded && (dims = png_dimensions(path))
+        return [dims[0], dims[1], File.binread(path)]
+      end
+
+      image = ChunkyPNG::Image.from_file(path)
+      png_data = if rounded
+        apply_rounded_corners!(image)
+        image.to_blob
+      else
+        File.binread(path)
+      end
+      [image.width, image.height, png_data]
+    end
+
+    def kitty_fit_dimensions(img_w, img_h, max_w, max_h)
+      cell_ratio = 2.0
+      img_cols = img_w.to_f
+      img_rows = img_h.to_f / cell_ratio
+      scale = [max_w / img_cols, max_h / img_rows].min
+
+      fit_cols = (img_cols * scale).floor.clamp(1, max_w)
+      fit_rows = (img_rows * scale).floor.clamp(1, max_h)
+      [fit_cols, fit_rows]
+    end
+
     # slot: stable ID for this image position (avoids flicker on re-render)
     def render_image_kitty(path, max_w, max_h, slot: 1, rounded: true)
       return nil unless path && File.exist?(path) && File.size(path) > 0
 
-      image = ChunkyPNG::Image.from_file(path)
-      if rounded
-        apply_rounded_corners!(image)
-        png_data = image.to_blob
-      else
-        png_data = File.binread(path)
-      end
+      img_w, img_h, png_data = kitty_image_payload(path, rounded: rounded)
       encoded = Base64.strict_encode64(png_data)
 
-      # Compute cols/rows that fit within max_w × max_h while preserving aspect ratio.
-      # Terminal cells are ~2x taller than wide (e.g. 8px × 16px).
-      cell_ratio = 2.0
-      img_w = image.width.to_f
-      img_h = image.height.to_f
-
-      # Convert image dimensions to "cell units" (cols and rows)
-      # 1 col of image = 1 cell width, 1 row of image = cell_ratio cell widths of height
-      img_cols = img_w
-      img_rows = img_h / cell_ratio  # in cell-equivalent units
-
-      scale_c = max_w / img_cols
-      scale_r = max_h / img_rows
-      scale = [scale_c, scale_r].min
-
-      fit_cols = (img_cols * scale).floor.clamp(1, max_w)
-      fit_rows = (img_rows * scale).floor.clamp(1, max_h)
+      fit_cols, fit_rows = kitty_fit_dimensions(img_w, img_h, max_w, max_h)
 
       # Delete previous image in this slot, then transmit+display
       result = +"\e_Ga=d,d=I,i=#{slot},q=2\e\\"
@@ -365,8 +381,9 @@ class Chewy
     def build_kitty_overlay(req)
       path = req[:path]
       return "" unless path && File.exist?(path) && File.size(path) > 0
+      rounded = req.fetch(:rounded, true)
 
-      cache_key = [path, req[:w], req[:h], req[:slot], req[:row], req[:col]]
+      cache_key = [path, req[:w], req[:h], req[:slot], req[:row], req[:col], rounded]
 
       if @_kitty_overlay_cache_key == cache_key && @_kitty_overlay_cache
         return @_kitty_overlay_cache
@@ -375,20 +392,13 @@ class Chewy
       slot = req[:slot]
       max_w = req[:w]; max_h = req[:h]
 
-      image = ChunkyPNG::Image.from_file(path)
-      cell_ratio = 2.0
-      img_cols = image.width.to_f
-      img_rows = image.height.to_f / cell_ratio
-      scale = [max_w / img_cols, max_h / img_rows].min
-      fit_cols = (img_cols * scale).floor.clamp(1, max_w)
-      fit_rows = (img_rows * scale).floor.clamp(1, max_h)
+      img_w, img_h, png_data = kitty_image_payload(path, rounded: rounded)
+      fit_cols, fit_rows = kitty_fit_dimensions(img_w, img_h, max_w, max_h)
 
       # Center the image within the target area
       col = req[:col] + [(max_w - fit_cols) / 2, 0].max
       row = req[:row] + [(max_h - fit_rows) / 2, 0].max
 
-      apply_rounded_corners!(image)
-      png_data = image.to_blob
       encoded = Base64.strict_encode64(png_data)
       chunks = encoded.scan(/.{1,4096}/)
 

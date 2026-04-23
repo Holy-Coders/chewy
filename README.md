@@ -94,7 +94,7 @@ API keys are entered in-app (stored securely with chmod 600) or via environment 
 | `F1` | Help overlay (all shortcuts) |
 | `^q` | Quit |
 
-In the gallery: `u` upscales the selected image (Real-ESRGAN 4x), `p` loads its prompt and settings.
+In the gallery: `c` copies the selected image to your clipboard, `u` upscales it (Real-ESRGAN 4x), `p` loads its prompt and settings.
 
 ### Models
 
