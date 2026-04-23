@@ -778,6 +778,7 @@ class Chewy
         ["^p", "Presets"],
         ["^t", "Theme picker"],
         ["^y", "Switch provider"],
+        ["^k", "HuggingFace + Civitai tokens"],
         ["^a", "Gallery"],
       ]],
       ["Image", [
@@ -988,6 +989,32 @@ class Chewy
 
     def render_hf_token_status
       "enter: save | esc: cancel"
+    end
+
+    def render_tokens_content
+      dim = Lipgloss::Style.new.foreground(Theme.TEXT_DIM)
+      accent = Lipgloss::Style.new.foreground(Theme.ACCENT)
+      active = Lipgloss::Style.new.foreground(Theme.PRIMARY).bold(true)
+      muted = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED)
+
+      lines = []
+      lines << dim.render("Tokens enable gated/NSFW downloads and higher rate limits.")
+      lines << dim.render("Env vars ") + accent.render("HF_TOKEN") + dim.render(" / ") + accent.render("CIVITAI_TOKEN") + dim.render(" override these.")
+      lines << ""
+      lines << (@tokens_field == 0 ? active.render("› HuggingFace") : muted.render("  HuggingFace"))
+      lines << "  " + accent.render("huggingface.co/settings/tokens")
+      lines << "  " + @tokens_hf_input.view
+      lines << ""
+      lines << (@tokens_field == 1 ? active.render("› Civitai") : muted.render("  Civitai"))
+      lines << "  " + accent.render("civitai.com/user/account") + dim.render(" → API Keys")
+      lines << "  " + @tokens_civitai_input.view
+      lines << ""
+      lines << dim.render("HF → ~/.cache/huggingface/token   |   Civitai → ~/.config/chewy/config.yml")
+      lines.join("\n")
+    end
+
+    def render_tokens_status
+      "tab: switch field | ^v: paste | enter: save | esc: cancel"
     end
 
     def render_prompt_search_content

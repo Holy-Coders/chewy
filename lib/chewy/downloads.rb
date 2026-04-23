@@ -236,11 +236,12 @@ class Chewy
       @model_downloading = true; @download_dest = part
       @download_total = size || 0; @download_filename = File.basename(filename); @error_message = nil
       url = hf_resolve_url(repo_id, filename)
+      auth = curl_auth_args(url)
       captured_repo = repo_id
       Proc.new do
         _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",
           "-C", "-", "--retry", "5", "--retry-delay", "3", "--retry-all-errors",
-          "--connect-timeout", "30", url)
+          "--connect-timeout", "30", *auth, url)
         if st.success?
           File.rename(part, dest)
           @model_sources[dest] = captured_repo
@@ -460,10 +461,11 @@ class Chewy
       part = "#{dest}.part"
       @model_downloading = true; @download_dest = part
       @download_total = size || 0; @download_filename = filename; @error_message = nil
+      auth = curl_auth_args(url)
       Proc.new do
         _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",
           "-C", "-", "--retry", "5", "--retry-delay", "3", "--retry-all-errors",
-          "--connect-timeout", "30", url)
+          "--connect-timeout", "30", *auth, url)
         if st.success?
           File.rename(part, dest)
           ModelDownloadDoneMessage.new(path: dest, filename: filename)
@@ -619,10 +621,11 @@ class Chewy
       @lora_downloading = true; @lora_download_dest = part
       @lora_download_total = size || 0; @lora_download_filename = File.basename(filename); @error_message = nil
       url = hf_resolve_url(repo_id, filename)
+      auth = curl_auth_args(url)
       Proc.new do
         _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",
           "-C", "-", "--retry", "5", "--retry-delay", "3", "--retry-all-errors",
-          "--connect-timeout", "30", url)
+          "--connect-timeout", "30", *auth, url)
         if st.success?
           File.rename(part, dest)
           LoraDownloadDoneMessage.new(path: dest, filename: File.basename(filename))
@@ -664,10 +667,11 @@ class Chewy
       dest = File.join(@lora_dir, filename); part = "#{dest}.part"
       @lora_downloading = true; @lora_download_dest = part
       @lora_download_total = size || 0; @lora_download_filename = filename; @error_message = nil
+      auth = curl_auth_args(url)
       Proc.new do
         _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",
           "-C", "-", "--retry", "5", "--retry-delay", "3", "--retry-all-errors",
-          "--connect-timeout", "30", url)
+          "--connect-timeout", "30", *auth, url)
         if st.success?
           File.rename(part, dest)
           LoraDownloadDoneMessage.new(path: dest, filename: filename)
@@ -906,10 +910,11 @@ class Chewy
       @model_downloading = true; @download_dest = part
       @download_total = size || 0; @download_filename = local_filename; @error_message = nil
       url = hf_resolve_url(repo_id, hf_filename)
+      auth = curl_auth_args(url)
       Proc.new do
         _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",
           "-C", "-", "--retry", "5", "--retry-delay", "3", "--retry-all-errors",
-          "--connect-timeout", "30", url)
+          "--connect-timeout", "30", *auth, url)
         if st.success?
           File.rename(part, dest)
           ModelDownloadDoneMessage.new(path: dest, filename: local_filename)
@@ -1022,11 +1027,12 @@ class Chewy
       # For controlnet models with hf_path, use that for the URL
       hf_file = item[:hf_path] || item[:file]
       url = hf_resolve_url(item[:repo], hf_file)
+      auth = curl_auth_args(url)
 
       cmd = Proc.new do
         _out, err, st = Open3.capture3("curl", "-fL", "-o", part, "-s",
           "-C", "-", "--retry", "5", "--retry-delay", "3", "--retry-all-errors",
-          "--connect-timeout", "30", url)
+          "--connect-timeout", "30", *auth, url)
         if st.success?
           File.rename(part, dest)
           StarterPackItemDoneMessage.new(item_name: filename)

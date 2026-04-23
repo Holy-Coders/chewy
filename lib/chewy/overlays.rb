@@ -27,6 +27,11 @@ class Chewy
       when :lora then scan_loras
       when :api_key then @api_key_input.focus; @api_key_input.value = ""
       when :hf_token then @hf_token_input.focus
+      when :tokens
+        @tokens_hf_input.value = resolve_hf_token.to_s
+        @tokens_civitai_input.value = resolve_civitai_token.to_s
+        @tokens_field = 0
+        @tokens_hf_input.focus; @tokens_civitai_input.blur
       when :preset then nil
       when :theme then @theme_index = THEME_NAMES.index(Theme.current_name) || 0; @theme_original = Theme.current_name
       when :provider then @provider_index = @providers.index(@provider) || 0
@@ -43,6 +48,9 @@ class Chewy
     def close_overlay
       @hf_token_input.blur if @overlay == :hf_token
       @api_key_input.blur if @overlay == :api_key
+      if @overlay == :tokens
+        @tokens_hf_input.blur; @tokens_civitai_input.blur
+      end
       clear_kitty_images if @kitty_graphics
       @overlay = nil
       @error_message = nil
@@ -70,6 +78,7 @@ class Chewy
       when :provider then handle_provider_key(message)
       when :api_key  then handle_api_key_key(message)
       when :hf_token then handle_hf_token_key(message)
+      when :tokens   then handle_tokens_key(message)
       when :gallery  then handle_gallery_key(message)
       when :fullscreen_image then handle_fullscreen_key(message)
       when :file_picker then handle_file_picker_key(message)
@@ -1051,6 +1060,44 @@ class Chewy
         return [self, toast]
       end
       @hf_token_input, cmd = @hf_token_input.update(message)
+      [self, cmd]
+    end
+
+    def handle_tokens_key(message)
+      key = message.to_s
+      active = @tokens_field == 0 ? @tokens_hf_input : @tokens_civitai_input
+      case key
+      when "esc"
+        return close_overlay
+      when "tab", "down"
+        @tokens_field = 1 - @tokens_field
+        @tokens_hf_input.blur; @tokens_civitai_input.blur
+        (@tokens_field == 0 ? @tokens_hf_input : @tokens_civitai_input).focus
+        return [self, nil]
+      when "shift+tab", "up"
+        @tokens_field = 1 - @tokens_field
+        @tokens_hf_input.blur; @tokens_civitai_input.blur
+        (@tokens_field == 0 ? @tokens_hf_input : @tokens_civitai_input).focus
+        return [self, nil]
+      when "ctrl+v"
+        return paste_text_into(active)
+      when "enter"
+        hf = @tokens_hf_input.value.strip
+        civ = @tokens_civitai_input.value.strip
+        save_hf_token(hf) unless hf.empty?
+        save_civitai_token(civ) unless civ.empty?
+        saved = []
+        saved << "HF" unless hf.empty?
+        saved << "Civitai" unless civ.empty?
+        toast = saved.empty? ? set_status_toast("No tokens entered") : set_status_toast("Saved: #{saved.join(' + ')}")
+        close_overlay
+        return [self, toast]
+      end
+      if @tokens_field == 0
+        @tokens_hf_input, cmd = @tokens_hf_input.update(message)
+      else
+        @tokens_civitai_input, cmd = @tokens_civitai_input.update(message)
+      end
       [self, cmd]
     end
 

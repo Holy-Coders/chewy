@@ -279,6 +279,7 @@ class Chewy
         end
       when "ctrl+x" then if @generating; @gen_cancelled = true; @provider.cancel(@gen_pid) if @provider.capabilities.cancel && @gen_pid; end; return [self, nil]
       when "ctrl+y" then return toggle_overlay(:provider)
+      when "ctrl+k" then return toggle_overlay(:tokens)
       when "f1", "ctrl+]" then return toggle_overlay(:help)
       when "tab"    then cycle_focus; return [self, nil]
       when "shift+tab" then cycle_focus(reverse: true); return [self, nil]
@@ -464,6 +465,14 @@ class Chewy
       end
       if @overlay == :api_key
         @api_key_input, cmd = @api_key_input.update(message)
+        return [self, cmd]
+      end
+      if @overlay == :tokens
+        if @tokens_field == 0
+          @tokens_hf_input, cmd = @tokens_hf_input.update(message)
+        else
+          @tokens_civitai_input, cmd = @tokens_civitai_input.update(message)
+        end
         return [self, cmd]
       end
 

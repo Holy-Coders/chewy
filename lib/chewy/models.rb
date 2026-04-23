@@ -495,6 +495,36 @@ class Chewy
       File.chmod(0600, HF_TOKEN_PATHS.first)
     end
 
+    def resolve_civitai_token
+      env = ENV["CIVITAI_TOKEN"] || ENV["CIVITAI_API_KEY"]
+      return env if env && !env.empty?
+      tok = (@config || {})["civitai_token"]
+      tok if tok && !tok.empty?
+    end
+
+    def save_civitai_token(token)
+      @config ||= {}
+      @config["civitai_token"] = token.to_s.strip
+      save_config
+    end
+
+    def auth_token_for(host)
+      return nil unless host
+      h = host.to_s.downcase
+      if h.include?("huggingface.co") || h.include?("hf.co")
+        resolve_hf_token
+      elsif h.include?("civitai.com") || h.include?("civitai.io")
+        resolve_civitai_token
+      end
+    end
+
+    def curl_auth_args(url)
+      host = URI.parse(url.to_s).host rescue nil
+      token = auth_token_for(host)
+      return [] unless token && !token.empty?
+      ["-H", "Authorization: Bearer #{token}"]
+    end
+
     def download_flux_companions
       missing = missing_flux_companions
       return [self, nil] if missing.empty?

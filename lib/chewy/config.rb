@@ -36,7 +36,8 @@ class Chewy
         "remote_model" => @remote_model_id,
         "default_video_frames" => @params&.dig(:video_frames) || 33,
         "default_fps" => @params&.dig(:fps) || 24,
-      }
+        "civitai_token" => @config&.dig("civitai_token"),
+      }.compact
       @config = data
       File.write(CONFIG_PATH, YAML.dump(data))
       File.chmod(0600, CONFIG_PATH) rescue nil

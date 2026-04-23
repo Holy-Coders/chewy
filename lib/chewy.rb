@@ -160,7 +160,7 @@ class Chewy
     @remote_model_id = @config["remote_model"] || nil
     @remote_model_index = 0
 
-    # Overlay: nil, :models, :download, :lora, :preset, :hf_token, :gallery, :fullscreen_image, :file_picker, :theme, :provider, :video_player
+    # Overlay: nil, :models, :download, :lora, :preset, :hf_token, :tokens, :gallery, :fullscreen_image, :file_picker, :theme, :provider, :video_player
     @overlay = nil
 
     # img2img / ControlNet
@@ -196,6 +196,19 @@ class Chewy
     @hf_token_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
     @hf_token_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
     @hf_token_pending_action = nil
+
+    # Download tokens overlay (HF + Civitai)
+    @tokens_hf_input = Bubbles::TextInput.new
+    @tokens_hf_input.placeholder = "hf_..."
+    @tokens_hf_input.prompt = ""
+    @tokens_hf_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
+    @tokens_hf_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
+    @tokens_civitai_input = Bubbles::TextInput.new
+    @tokens_civitai_input.placeholder = "civitai api key"
+    @tokens_civitai_input.prompt = ""
+    @tokens_civitai_input.placeholder_style = Lipgloss::Style.new.foreground(Theme.TEXT_MUTED).italic(true)
+    @tokens_civitai_input.text_style = Lipgloss::Style.new.foreground(Theme.TEXT)
+    @tokens_field = 0  # 0 = HF, 1 = Civitai
 
     # API key input (for remote providers)
     @api_key_input = Bubbles::TextInput.new
@@ -530,6 +543,7 @@ class Chewy
       when :help then render_help_view
       when :preset   then render_overlay_panel("Presets", render_preset_content, render_preset_status)
       when :hf_token then render_overlay_panel("HuggingFace Token", render_hf_token_content, render_hf_token_status)
+      when :tokens   then render_overlay_panel("Download Tokens", render_tokens_content, render_tokens_status)
       when :gallery  then render_gallery_view
       when :fullscreen_image then render_fullscreen_image
       when :file_picker then render_file_picker_view

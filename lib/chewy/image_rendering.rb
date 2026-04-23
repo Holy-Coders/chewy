@@ -449,6 +449,9 @@ class Chewy
       http.read_timeout = 30; http.open_timeout = 10
       req = Net::HTTP::Get.new(uri)
       req["Accept"] = "application/json"; req["User-Agent"] = "chewy-tui/1.0"
+      if (token = auth_token_for(uri.host)) && !token.empty?
+        req["Authorization"] = "Bearer #{token}"
+      end
       resp = http.request(req)
       case resp
       when Net::HTTPRedirection then hf_get(URI.parse(resp["location"]), limit - 1)
